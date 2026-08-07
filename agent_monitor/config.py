@@ -87,7 +87,10 @@ class Settings:
         self._session_key: str | None = None
         self._stored_key: str | None = stored.get("api_key")
         self.model: str = stored.get("model", "claude-sonnet-4-6")
-        self.ai_enabled: bool = False  # always starts off; opt-in per session
+        #: On by default, and remembered. Turning it off sticks across restarts.
+        #: Nothing is sent without a key regardless, so this is inert until one
+        #: is configured.
+        self.ai_enabled: bool = bool(stored.get("ai_enabled", True))
         self.remember_key: bool = bool(stored.get("api_key"))
 
     @property
@@ -124,6 +127,12 @@ class Settings:
             data = load()
             data.pop("api_key", None)
             save(data)
+
+    def set_ai_enabled(self, value: bool) -> None:
+        self.ai_enabled = bool(value)
+        data = load()
+        data["ai_enabled"] = self.ai_enabled
+        save(data)
 
     def set_model(self, model: str) -> None:
         self.model = model

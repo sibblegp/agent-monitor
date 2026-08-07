@@ -99,16 +99,6 @@ export function initSettings(handler) {
       el.keyStatus.textContent = 'Add an API key to enable AI insights.';
       return;
     }
-    if (turningOn && !window.__agentMonitorAiConsent) {
-      const ok = confirm(
-        'Enable AI insights?\n\n' +
-          'The diffs of changed symbols in the current scope will be sent to the ' +
-          'Anthropic API to generate summaries, risk flags, themes, and a review note.\n\n' +
-          'Nothing else is sent, and the visualization works fully without this.'
-      );
-      if (!ok) return;
-      window.__agentMonitorAiConsent = true;
-    }
     push({ ai_enabled: turningOn });
   });
 

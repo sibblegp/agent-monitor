@@ -106,8 +106,13 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             settings, annotator, on_entry=narration_arrived, on_delta=narration_delta
         )
         engine.attach_ai(annotator, narrator)
+        # AI is on by default, so pick that up at boot rather than waiting for
+        # the user to toggle something.
+        narrator.set_enabled(settings.ai_enabled)
         # A repo opened via the CLI starts watching only once the loop exists.
         engine._start_watcher()
+        if settings.ai_enabled and engine.target is not None:
+            engine.request_ai()
 
     @app.on_event("shutdown")
     async def _teardown() -> None:
@@ -245,7 +250,7 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
         if "api_key" in body:
             settings.set_key(body.get("api_key"), bool(body.get("remember")))
         if "ai_enabled" in body:
-            settings.ai_enabled = bool(body["ai_enabled"])
+            settings.set_ai_enabled(bool(body["ai_enabled"]))
             if engine.narrator is not None:
                 engine.narrator.set_enabled(settings.ai_enabled)
             if settings.ai_enabled and engine.target is not None:

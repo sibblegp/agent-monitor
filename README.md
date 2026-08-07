@@ -7,8 +7,10 @@ unified diff shows you *text*, not *shape*. Agent Monitor runs in a window
 beside your agent's terminal and answers the question a diff can't — **what part
 of the system did this touch?**
 
-Two panes, updating as the agent works:
+Three panes, updating as the agent works:
 
+- **Narrative** — a streamed, running commentary on what the agent is doing
+  (optional; needs an API key).
 - **Structure** — repository → directories → files → classes → functions, as a
   force-directed graph. Changed things light up and pulse.
 - **Flow** — the static call graph. Entry points on the left, fanning right
@@ -153,13 +155,17 @@ what does it call?".
 
 ## Optional AI insights
 
-**Off by default.** Enable it in Settings with an Anthropic API key and Agent
-Monitor will annotate each changeset with:
+**On by default, but inert without a key** — nothing is sent until you add an
+Anthropic API key in Settings. Once you do, Agent Monitor annotates each
+changeset with:
 
 - a one-line summary per changed symbol,
 - a risk level and reason,
 - named themes over the changeset, drawn as labelled hulls behind their members,
-- a copyable review note for the whole diff.
+- a copyable review note for the whole diff,
+- and a running commentary in the **Narrative** pane on the left, streamed as
+  it's written: a play-by-play of what the agent appears to be doing, where each
+  entry describes only what changed since the last one.
 
 One batched request per changeset — never one per symbol — with results cached
 per `(symbol, body hash)` so a symbol is analysed once no matter how much churns
@@ -168,7 +174,8 @@ around it. There's a live token/cost meter and a per-session request cap.
 The key is read from `ANTHROPIC_API_KEY`, or entered in Settings (optionally
 saved to the config file at mode `0600`). It is never sent back to the frontend
 — the UI only ever sees a masked hint. A failed AI call never degrades the
-visualization; it's strictly additive.
+visualization; it's strictly additive. Turn it off with the toggle in the top
+bar; that choice is remembered.
 
 ---
 
