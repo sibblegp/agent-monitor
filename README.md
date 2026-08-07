@@ -39,8 +39,21 @@ analysis, and `anthropic` for the optional AI annotations. Install just
 
 ## Run
 
-**Native window (recommended)** — Electron shell, native folder picker, real
-window that tiles properly:
+The easy way:
+
+```bash
+./run.sh                  # native window, watching this repo
+./run.sh ~/code/project   # native window, watching that repo
+./run.sh --browser        # browser instead of the native window
+```
+
+It finds the project venv, prefers the Electron shell, and falls back to the
+browser automatically if Electron isn't installed.
+
+Or run either flavour directly:
+
+**Native window** — Electron shell, native folder picker, real window that
+tiles properly:
 
 ```bash
 cd electron && npm install && npm start
