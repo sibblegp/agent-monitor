@@ -89,6 +89,7 @@ function handleHover(id, ev) {
 function handlePick(id, pane) {
   if (!id) {
     store.selected = null;
+    dirty = true;
     return;
   }
   // Clicking a file toggles its expansion; clicking anything else focuses it
@@ -97,9 +98,11 @@ function handlePick(id, pane) {
   const node = store.nodes.get(id);
   if (pane === 'structure' && node?.kind === 'file') {
     forceLayout.toggle(id);
+    dirty = true;
     return;
   }
   store.selected = store.selected === id ? null : id;
+  dirty = true;
 }
 
 store.on((kind, payload) => {
@@ -124,15 +127,42 @@ function centerOn(id) {
 
 // ── the shared loop ───────────────────────────────────────────────────
 
+/**
+ * Set whenever something that affects the picture changes but isn't itself
+ * animated (hover, selection, filter, expansion). Lets the loop idle at zero
+ * work when the graph is at rest, which matters for a window that sits open
+ * next to an agent all day.
+ */
+let dirty = true;
+export function markDirty() {
+  dirty = true;
+}
+
+let lastHover = null;
+let lastSelected = null;
+
 function frame(now) {
   forceLayout.sync();
   layeredLayout.sync();
 
-  forceLayout.step();
-  layeredLayout.step();
+  const simMoving = forceLayout.step();
+  const flowMoving = layeredLayout.step();
 
-  structureScene.camera.step();
-  flowScene.camera.step();
+  const camMoving = structureScene.camera.step() | flowScene.camera.step();
+
+  if (store.hover !== lastHover || store.selected !== lastSelected) {
+    lastHover = store.hover;
+    lastSelected = store.selected;
+    dirty = true;
+  }
+
+  const animating = simMoving || flowMoving || camMoving || store.hasLiveActivity;
+
+  if (!animating && !dirty && !needsFit && !settleFit) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  dirty = false;
 
   if (needsFit && forceLayout.points().length) {
     fitAll(true);
@@ -234,6 +264,7 @@ function banner(text, kind = 'info', ms = 5200) {
 function applySnapshot(payload, { refit = false } = {}) {
   store.applySnapshot(payload, { animate: true });
   store.seedEventsFromChanges();
+  dirty = true;
   forceLayout.sync(true);
   layeredLayout.sync(true);
   if (refit) needsFit = true;
@@ -301,6 +332,7 @@ el.filterSeg.addEventListener('click', (ev) => {
 
 function setFilter(value) {
   store.filter = value;
+  dirty = true;
   selectSeg(el.filterSeg, 'filter', value);
   store.version += 1; // force both layouts to reconcile
   forceLayout.sync(true);
@@ -437,6 +469,7 @@ const observer = new ResizeObserver(() => {
     forceLayout.reheat(0.4);
     fitAll();
     updateChrome();
+    dirty = true;
   }, 160);
 });
 observer.observe(el.paneStructure);

@@ -111,6 +111,12 @@ export class ForceLayout {
     }
     const ids = new Set(shown.map((n) => n.id));
 
+    // Distinguish "the graph actually changed shape" from "only statuses
+    // changed". During live editing the latter is the common case, and
+    // reheating hard for it makes the whole layout lurch on every keystroke.
+    const sameShape =
+      ids.size === this.pos.size && [...ids].every((id) => this.pos.has(id));
+
     for (const id of [...this.pos.keys()]) {
       if (!ids.has(id)) this.pos.delete(id);
     }
@@ -150,7 +156,7 @@ export class ForceLayout {
       }
     }
 
-    this.reheat();
+    this.reheat(sameShape ? 0.05 : 0.85);
   }
 
   reheat(value = 0.9) {

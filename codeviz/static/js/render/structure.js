@@ -197,7 +197,10 @@ export class StructureRenderer {
 
       const fx = store.fxOf(node.id);
       const changed = isChanged(node);
-      const hot = heat(fx, now, HOT_MS);
+      // Only the latest change burst animates; older changes stay legible
+      // through colour alone.
+      const recent = store.isRecent(node.id, now);
+      const hot = recent ? heat(fx, now, HOT_MS) : 0;
       const dimmed = highlight && !highlight.has(node.id);
 
       let alpha = dimmed ? 0.16 : 1;
@@ -206,9 +209,9 @@ export class StructureRenderer {
 
       if (node.status === 'removed') {
         alpha *= 0.5;
-      } else if (node.status === 'modified') {
+      } else if (recent && node.status === 'modified') {
         radius *= breathe(now, 1.2, 0.06);
-      } else if (node.status === 'added') {
+      } else if (recent && node.status === 'added') {
         alpha *= blinkAlpha(fx, now);
       }
 
@@ -228,7 +231,7 @@ export class StructureRenderer {
       const glow = isContainer
         ? 0.08
         : changed
-          ? 0.5 + hot * 0.8
+          ? 0.34 + hot * 0.95
           : node.kind === 'file'
             ? 0.1
             : 0.04;

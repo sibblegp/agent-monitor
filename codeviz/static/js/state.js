@@ -8,8 +8,15 @@
 
 export const CHANGED = new Set(['added', 'modified', 'signature_changed', 'removed', 'renamed']);
 
-/** How long a touched node keeps its glow, so you can see *recency*. */
-export const HOT_MS = 12000;
+/**
+ * How long a just-changed node keeps its glow.
+ *
+ * Animation is strictly event-driven: only nodes that changed in the *latest*
+ * update move. Everything else — including changes from earlier in the session
+ * — is drawn statically and identified by colour alone. Ambient motion competes
+ * with the thing you actually want noticed.
+ */
+export const HOT_MS = 9000;
 
 function makeFx() {
   return {
@@ -43,6 +50,21 @@ export class Store {
     this.events = []; // activity feed entries
     this.version = 0; // bumped whenever the graph shape changes
     this.listeners = new Set();
+
+    /** Nodes that changed in the most recent update — the only ones that animate. */
+    this.recent = new Set();
+    this.recentAt = 0;
+    /** First snapshot establishes the baseline and deliberately animates nothing. */
+    this.hasBaseline = false;
+  }
+
+  /** True while `id` is part of the latest change burst. */
+  isRecent(id, now) {
+    return this.recent.has(id) && now - this.recentAt < HOT_MS;
+  }
+
+  get hasLiveActivity() {
+    return this.recent.size > 0 && performance.now() - this.recentAt < HOT_MS;
   }
 
   on(fn) {
@@ -82,17 +104,31 @@ export class Store {
       if (!this.nodes.has(id)) this.fx.delete(id);
     }
 
+    // Only nodes whose status changed *in this update* animate. On the very
+    // first snapshot nothing animates at all — pre-existing changes aren't
+    // "work happening now", they're just the state of the tree.
+    const firstLoad = !this.hasBaseline;
+    const justChanged = new Set();
+
     for (const [id, node] of this.nodes) {
       const fx = this.fxOf(id);
       const isNew = !previous.has(id);
-      if (fx.born === 0) fx.born = animate && isNew ? now : now - 2000;
-      if (CHANGED.has(node.status) && fx.lastStatus !== node.status) {
+      if (fx.born === 0) fx.born = animate && isNew && !firstLoad ? now : now - 5000;
+
+      if (!firstLoad && CHANGED.has(node.status) && fx.lastStatus !== node.status) {
+        justChanged.add(id);
         fx.hotUntil = now + HOT_MS;
         fx.pulses.push({ start: now, kind: node.status });
         if (node.status === 'added') fx.blinks = 3;
       }
       fx.lastStatus = node.status;
     }
+
+    if (justChanged.size) {
+      this.recent = justChanged;
+      this.recentAt = now;
+    }
+    this.hasBaseline = true;
 
     this.version += 1;
     this.emit('snapshot', payload);

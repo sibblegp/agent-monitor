@@ -15,12 +15,29 @@ export class Camera {
     this.targetScale = 1;
   }
 
-  /** Ease toward the target each frame so fits and zooms glide. */
+  /**
+   * Ease toward the target each frame so fits and zooms glide.
+   * Returns true while still moving. Snaps when close enough — an asymptotic
+   * lerp never quite arrives, and the leftover sub-pixel drift reads as a
+   * permanent shimmer.
+   */
   step() {
     const k = 0.18;
-    this.x = lerp(this.x, this.targetX, k);
-    this.y = lerp(this.y, this.targetY, k);
-    this.scale = lerp(this.scale, this.targetScale, k);
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const ds = this.targetScale - this.scale;
+
+    if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 && Math.abs(ds) < 0.0002) {
+      this.x = this.targetX;
+      this.y = this.targetY;
+      this.scale = this.targetScale;
+      return false;
+    }
+
+    this.x += dx * k;
+    this.y += dy * k;
+    this.scale += ds * k;
+    return true;
   }
 
   apply(ctx) {

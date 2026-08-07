@@ -76,11 +76,14 @@ export class FlowRenderer {
       const dstNode = store.nodes.get(edge.dst);
       const touched = isChanged(srcNode) || isChanged(dstNode);
       const dimmed = highlight && !(highlight.has(edge.src) && highlight.has(edge.dst));
+      // Particles ride only edges attached to a change from the *latest*
+      // update. Drifting dots on every edge is ambient noise that competes
+      // with the one thing you're meant to look at.
+      const live = store.isRecent(edge.src, now) || store.isRecent(edge.dst, now);
 
       const color = touched
         ? COLORS[isChanged(srcNode) ? srcNode.status : dstNode.status] || COLORS.modified
         : '#2b3644';
-      const line = color;
       const alpha = dimmed ? 0.06 : touched ? 0.5 : 0.2;
 
       const path = bezier(a, b);
@@ -89,16 +92,12 @@ export class FlowRenderer {
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.bezierCurveTo(path.c1x, path.c1y, path.c2x, path.c2y, b.x, b.y);
-      ctx.strokeStyle = rgba(line, alpha);
+      ctx.strokeStyle = rgba(color, alpha);
       ctx.lineWidth = clamp(0.6 + Math.log2(1 + (edge.count || 1)) * 0.55, 0.6, 3.2);
       ctx.stroke();
 
-      if (!dimmed && this.scene.camera.scale > 0.28) {
-        drawEdgeParticles(ctx, path, now, {
-          color: touched ? color : '#5d6b80',
-          density: touched ? 3 : 1,
-          speed: touched ? 1.7 : 1,
-        });
+      if (live && !dimmed && this.scene.camera.scale > 0.28) {
+        drawEdgeParticles(ctx, path, now, { color, density: 3, speed: 1.7 });
       }
     }
   }
@@ -114,7 +113,8 @@ export class FlowRenderer {
 
       const fx = store.fxOf(node.id);
       const changed = isChanged(node);
-      const hot = heat(fx, now, HOT_MS);
+      const recent = store.isRecent(node.id, now);
+      const hot = recent ? heat(fx, now, HOT_MS) : 0;
       const dimmed = highlight && !highlight.has(node.id);
 
       let alpha = dimmed ? 0.14 : 1;
@@ -128,8 +128,8 @@ export class FlowRenderer {
             : '#4d5a6e';
 
       if (node.status === 'removed') alpha *= 0.5;
-      else if (node.status === 'modified') radius *= breathe(now, 1.2, 0.07);
-      else if (node.status === 'added') alpha *= blinkAlpha(fx, now);
+      else if (recent && node.status === 'modified') radius *= breathe(now, 1.2, 0.07);
+      else if (recent && node.status === 'added') alpha *= blinkAlpha(fx, now);
 
       // External packages read as hollow rings — they're not your code.
       if (node.kind === 'external') {
