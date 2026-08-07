@@ -1,0 +1,192 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeViz</title>
+<link rel="stylesheet" href="/css/app.css" />
+
+<div id="app">
+  <!-- ───────────────────────── top bar ───────────────────────── -->
+  <header id="topbar">
+    <div class="brand" title="CodeViz">
+      <span class="brand-mark"></span>
+      <span class="brand-name">CodeViz</span>
+    </div>
+
+    <button id="repo-button" class="chip chip-repo" title="Open a repository (Ctrl+O)">
+      <span class="ico">📂</span>
+      <span id="repo-name">No repository</span>
+      <span id="repo-branch" class="branch"></span>
+    </button>
+
+    <div class="sep"></div>
+
+    <div class="seg" id="source-seg" role="group" aria-label="Change source">
+      <button class="seg-btn is-active" data-mode="live" title="Uncommitted changes vs HEAD">Live</button>
+      <button class="seg-btn" data-mode="commit" title="Pick a recent commit">Commit</button>
+      <button class="seg-btn" data-mode="branch" title="Compare a branch against trunk">Branch</button>
+    </div>
+
+    <div class="seg" id="filter-seg" role="group" aria-label="Filter">
+      <button class="seg-btn is-active" data-filter="all" title="Show the whole codebase (a)">All</button>
+      <button class="seg-btn" data-filter="changes" title="Show only what changed (a)">Changes</button>
+    </div>
+
+    <label class="depth" title="How many call hops around each change to include">
+      <span>depth</span>
+      <input id="depth" type="range" min="1" max="3" step="1" value="2" />
+      <output id="depth-out">2</output>
+    </label>
+
+    <div class="spacer"></div>
+
+    <div id="stats" class="stats"></div>
+
+    <button id="ai-toggle" class="chip chip-ai" title="Optional AI insights (off by default)">
+      <span class="ico">✨</span><span id="ai-label">AI insights — off</span>
+    </button>
+
+    <button id="pause" class="icon-btn" title="Pause live updates (space)">⏸</button>
+    <button id="fit" class="icon-btn" title="Fit to view (f)">⤢</button>
+    <button id="settings-button" class="icon-btn" title="Settings">⚙</button>
+  </header>
+
+  <!-- ───────────────────────── panes ───────────────────────── -->
+  <main id="panes">
+    <section class="pane" id="pane-structure">
+      <div class="pane-head">
+        <h2>Structure</h2>
+        <span class="pane-sub" id="structure-sub"></span>
+      </div>
+      <canvas id="canvas-structure"></canvas>
+      <div class="pane-empty" id="structure-empty" hidden></div>
+    </section>
+
+    <div id="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+
+    <section class="pane" id="pane-flow">
+      <div class="pane-head">
+        <h2>Flow</h2>
+        <span class="pane-sub" id="flow-sub"></span>
+      </div>
+      <canvas id="canvas-flow"></canvas>
+      <div class="pane-empty" id="flow-empty" hidden></div>
+    </section>
+  </main>
+
+  <!-- ───────────────────────── activity feed ───────────────────────── -->
+  <footer id="feed">
+    <div class="feed-head">
+      <span class="dot-live" id="live-dot"></span>
+      <span>Activity</span>
+    </div>
+    <ol id="feed-list" class="feed-list"></ol>
+    <div class="legend" id="legend"></div>
+  </footer>
+
+  <!-- ───────────────────────── overlays ───────────────────────── -->
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <!-- Open dialog (browser-mode directory browser) -->
+  <div id="open-dialog" class="modal" hidden>
+    <div class="modal-card modal-open">
+      <div class="modal-head">
+        <h3>Open repository</h3>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+      <div class="open-body">
+        <aside class="open-recents">
+          <h4>Recent</h4>
+          <ul id="recent-list"></ul>
+        </aside>
+        <div class="open-browse">
+          <div class="crumbs" id="crumbs"></div>
+          <input
+            id="path-input"
+            class="path-input"
+            spellcheck="false"
+            placeholder="Type or paste a path, then press Enter" />
+          <ul id="dir-list" class="dir-list" tabindex="0"></ul>
+          <div class="open-actions">
+            <label class="check">
+              <input type="checkbox" id="show-hidden" /> Show hidden
+            </label>
+            <span class="spacer"></span>
+            <span class="open-hint" id="open-hint"></span>
+            <button id="open-confirm" class="btn btn-primary">Use this folder</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Commit / branch picker -->
+  <div id="ref-dialog" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="ref-title">Pick a commit</h3>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+      <ul id="ref-list" class="ref-list"></ul>
+    </div>
+  </div>
+
+  <!-- Settings / AI -->
+  <div id="settings-dialog" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Settings</h3>
+        <button class="icon-btn" data-close>✕</button>
+      </div>
+      <div class="settings-body">
+        <section>
+          <h4>AI insights <span class="tag">optional</span></h4>
+          <p class="muted">
+            Sends the diff of changed symbols in the current scope to the Anthropic API
+            to generate one-line summaries, risk flags, change themes, and a review note.
+            Off by default. The visualization works fully without it.
+          </p>
+          <label class="field">
+            <span>API key</span>
+            <input id="api-key" type="password" spellcheck="false" placeholder="sk-ant-…" />
+          </label>
+          <div id="key-status" class="muted small"></div>
+          <label class="check">
+            <input type="checkbox" id="remember-key" />
+            Remember on this machine (written to the config file, mode 0600)
+          </label>
+          <label class="field">
+            <span>Model</span>
+            <select id="model">
+              <option value="claude-sonnet-4-6">claude-sonnet-4-6 — fast (default)</option>
+              <option value="claude-haiku-4-5">claude-haiku-4-5 — fastest / cheapest</option>
+              <option value="claude-sonnet-5">claude-sonnet-5 — newer sibling</option>
+            </select>
+          </label>
+          <div id="cost-meter" class="muted small"></div>
+        </section>
+        <section>
+          <h4>Keyboard</h4>
+          <ul class="keys">
+            <li><kbd>Ctrl</kbd>+<kbd>O</kbd> open repository</li>
+            <li><kbd>space</kbd> pause / resume live updates</li>
+            <li><kbd>a</kbd> toggle all ⇄ changes</li>
+            <li><kbd>f</kbd> fit to view</li>
+            <li><kbd>1</kbd> / <kbd>2</kbd> focus structure / flow</li>
+            <li><kbd>/</kbd> search</li>
+            <li><kbd>esc</kbd> clear focus</li>
+          </ul>
+        </section>
+        <section id="diag"></section>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div id="search-bar" class="search-bar" hidden>
+    <input id="search-input" spellcheck="false" placeholder="Search symbols and files…" />
+    <ul id="search-results"></ul>
+  </div>
+</div>
+
+<script type="module" src="/js/main.js"></script>

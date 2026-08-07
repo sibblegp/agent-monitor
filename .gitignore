@@ -1,0 +1,22 @@
+# virtualenv
+env_cv/
+.venv/
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# node / electron
+node_modules/
+electron/node_modules/
+
+# codeviz
+.codeviz-cache/
+
+# editors / os
+.DS_Store
+*.swp
