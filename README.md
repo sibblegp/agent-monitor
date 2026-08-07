@@ -202,3 +202,8 @@ tools/simulate_agent.py scripted demo edits
 The frontend has **no build step and no dependencies** — plain ES modules and
 Canvas 2D, including the force and layered-DAG layouts. Edit a file under
 `static/` and reload.
+
+---
+
+Built by **George Sibble**, who is available for contract and AI engineering
+work.
