@@ -227,24 +227,48 @@ export class Store {
     this.emit('event', entry);
   }
 
-  /** Build feed entries from a fresh changeset. */
+  /**
+   * Build feed entries from a fresh changeset.
+   *
+   * Entries that changed in the latest update float to the top — the changeset
+   * itself arrives in file order, which would bury the thing that just
+   * happened somewhere in the middle of the list.
+   */
   seedEventsFromChanges() {
     if (!this.changes) return;
-    this.events = [];
+
     const symbols = (this.changes.symbols || []).filter((s) => CHANGED.has(s.status));
     const source = symbols.length ? symbols : this.changes.files || [];
-    for (const item of source.slice(0, 60)) {
-      this.events.push({
-        at: Date.now(),
-        id: item.id || `file:${item.path}`,
+
+    // Preserve the timestamp of entries we've already seen, so "3s ago" doesn't
+    // reset to "0s" on every unrelated update.
+    const previous = new Map(this.events.map((e) => [`${e.id}|${e.status}`, e.at]));
+    const now = Date.now();
+
+    const entries = source.map((item) => {
+      const id = item.id || `file:${item.path}`;
+      const key = `${id}|${item.status}`;
+      return {
+        at: previous.get(key) ?? now,
+        id,
         status: item.status,
         name: item.name || item.path.split('/').pop(),
         path: item.path,
         added: item.added || 0,
         removed: item.removed || 0,
         kind: item.kind || 'file',
-      });
-    }
+        line: item.line,
+      };
+    });
+
+    entries.sort((a, b) => {
+      const aRecent = this.recent.has(a.id) ? 1 : 0;
+      const bRecent = this.recent.has(b.id) ? 1 : 0;
+      if (aRecent !== bRecent) return bRecent - aRecent;
+      return b.at - a.at;
+    });
+
+    this.events = entries.slice(0, 60);
     this.emit('event', null);
   }
 }

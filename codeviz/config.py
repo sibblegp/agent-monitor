@@ -52,6 +52,25 @@ def save(data: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def session_token(regenerate: bool = False) -> str:
+    """A loopback auth token that survives restarts.
+
+    Minting a fresh token on every start invalidates any tab you already have
+    open, which is miserable while iterating — the window just 403s. The token
+    is stored alongside the rest of the config at 0600 and reused; pass
+    `regenerate=True` (CLI: --new-token) to roll it.
+    """
+    import secrets
+
+    data = load()
+    token = data.get("token")
+    if regenerate or not token:
+        token = secrets.token_urlsafe(24)
+        data["token"] = token
+        save(data)
+    return token
+
+
 def mask_key(key: str | None) -> str | None:
     """`sk-ant-…a1b2` — enough to recognize, useless if leaked."""
     if not key:

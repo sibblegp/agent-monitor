@@ -57,3 +57,8 @@ def risk_band(score: float) -> str:
     if score > 25:
         return "medium"
     return "low"
+
+
+def top_paths(ranked: list[tuple[str, int]], limit: int = 5) -> list[str]:
+    """Paths of the highest-blast-radius changes."""
+    return [node_id.split("::", 1)[0] for node_id, _ in ranked[:limit]]

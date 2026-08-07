@@ -30,8 +30,8 @@ _STATUS_RANK = {
 }
 
 
-def _rank(status: str) -> int:
-    return _STATUS_RANK.get(status, 0)
+def _rank(status: str, default: int = 0) -> int:
+    return _STATUS_RANK.get(status, default)
 
 
 def _ensure_dirs(graph: Graph, relpath: str, scope: str) -> str:
@@ -217,6 +217,7 @@ def _roll_up_sizes_and_status(graph: Graph) -> None:
     def visit(node_id: str) -> tuple[int, str]:
         node = graph.nodes[node_id]
         kid_ids = children.get(node_id, [])
+
         if node.kind not in ("root", "dir"):
             best = node.status
             for kid in kid_ids:
@@ -226,15 +227,26 @@ def _roll_up_sizes_and_status(graph: Graph) -> None:
             return node.size, best
 
         total = 0
-        best = "unchanged"
+        statuses: list[str] = []
         for kid in kid_ids:
             size, status = visit(kid)
             total += size
-            if _rank(status) > _rank(best):
-                best = status
+            statuses.append(status)
+
+        # A container reports that its *contents* changed — not the strongest
+        # status among them. Taking the max meant a single new function made the
+        # whole repository read as "added", which is simply wrong.
+        changed = [s for s in statuses if s in CHANGED_STATUSES]
+        if not changed:
+            rolled = "unchanged"
+        elif len(changed) == len(statuses) and all(s == "added" for s in changed):
+            rolled = "added"  # genuinely a brand-new directory
+        else:
+            rolled = "modified"
+
         node.size = total
-        node.status = best
-        return total, best
+        node.status = rolled
+        return total, rolled
 
     if ROOT_ID in graph.nodes:
         visit(ROOT_ID)

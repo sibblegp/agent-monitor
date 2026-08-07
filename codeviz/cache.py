@@ -69,6 +69,10 @@ class ParseCache:
         self._blobs.clear()
         self.hits = self.misses = 0
 
+    def hit_rate(self) -> float:
+        total = self.hits + self.misses
+        return self.hits / total if total else 0.0
+
     def stats(self) -> dict[str, int]:
         return {
             "worktree": len(self._worktree),

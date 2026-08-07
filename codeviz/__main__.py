@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import secrets
 import socket
 import sys
 import webbrowser
 
-from .config import Settings
+from .config import Settings, session_token
 from .engine import Engine
 from .gitutil import GitError
 
@@ -42,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ref", help="commit sha, branch name, or 'a..b' for --mode")
     parser.add_argument("--model", help="Anthropic model for optional AI insights")
     parser.add_argument("--no-browser", action="store_true", help="don't open a browser")
+    parser.add_argument(
+        "--new-token",
+        action="store_true",
+        help="roll the loopback auth token (invalidates open tabs)",
+    )
     return parser
 
 
@@ -62,7 +66,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"codeviz: {exc}", file=sys.stderr)
             return 2
 
-    token = secrets.token_urlsafe(24)
+    # Stable across restarts so an already-open tab keeps working.
+    token = session_token(regenerate=args.new_token)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
