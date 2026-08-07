@@ -28,7 +28,11 @@ review the shape of a change before opening a PR.
 
 ## Install
 
-Requires Python 3.10+ and `git`.
+**macOS app** — the easiest path: grab the signed, notarized DMG from the
+[latest release](https://github.com/sibblegp/agent-monitor/releases/latest).
+Nothing else to install.
+
+**From source** — requires Python 3.10+ and `git`.
 
 ```bash
 python -m venv env_cv

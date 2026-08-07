@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Monitor — watch your AI agent work</title>
+  <meta name="description" content="An AI agent rewriting your codebase looks like scrolling text in a terminal. Agent Monitor shows you what it's actually doing — every file, class, and function it touches, lighting up live.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0c10">
+
+  <link rel="canonical" href="https://agent-monitor.ai/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://agent-monitor.ai/">
+  <meta property="og:title" content="Agent Monitor — watch your AI agent work">
+  <meta property="og:description" content="Live structure &amp; flow visualization of what an AI coding agent is doing to your codebase, with AI-written commentary and review notes.">
+  <meta property="og:image" content="https://agent-monitor.ai/assets/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233ddc84'/%3E%3Cstop offset='0.45' stop-color='%2338bdf8'/%3E%3Cstop offset='0.75' stop-color='%23a06bff'/%3E%3Cstop offset='1' stop-color='%23f5a623'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='3' y='3' width='26' height='26' rx='7' fill='url(%23g)'/%3E%3C/svg%3E">
+
+  <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#" aria-label="Agent Monitor — back to top">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">Agent Monitor</span>
+      </a>
+      <nav class="topbar-links" aria-label="Primary">
+        <a class="text-link" href="https://github.com/sibblegp/agent-monitor">GitHub</a>
+        <a class="btn btn-primary btn-small" href="https://github.com/sibblegp/agent-monitor/releases/latest">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ── hero ─────────────────────────────────────────────────────── -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-glow" aria-hidden="true"></div>
+      <div class="wrap hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">Live agent visualization &middot; Commit review &middot; AI commentary</p>
+          <h1 id="hero-title">Watch your agent work.</h1>
+          <p class="sub">
+            An AI agent rewriting your codebase looks like scrolling text in a
+            terminal. Agent Monitor shows you what it's actually doing — every
+            file, class, and function it touches, lighting up live.
+          </p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" href="https://github.com/sibblegp/agent-monitor/releases/latest">Download for macOS</a>
+            <a class="btn btn-ghost" href="https://github.com/sibblegp/agent-monitor">View on GitHub</a>
+            <p class="cta-note">Apple Silicon &middot; DMG &middot; signed &amp; notarized</p>
+          </div>
+        </div>
+        <div class="hero-stage">
+          <canvas id="hero-canvas" aria-hidden="true"></canvas>
+          <p class="visually-hidden">
+            Animated visualization of a code graph: nodes for directories,
+            files, classes, and functions light up and pulse as an AI agent
+            modifies, adds, and removes them.
+          </p>
+          <div class="hero-feed" aria-hidden="true">
+            <span class="dot"></span>
+            <span id="hero-caption" class="mono" data-state="idle">watching&hellip;</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── feature 1: live monitoring ───────────────────────────────── -->
+    <section aria-labelledby="f1-title">
+      <div class="wrap">
+        <div class="feature">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Live monitoring</p>
+            <h2 id="f1-title">See the agent, not the scrollback.</h2>
+            <p>
+              A dozen files change per agent turn, and all you get is text
+              rushing past. Agent Monitor runs beside your agent's terminal
+              and answers the question the scrollback can't:
+              <strong>what part of the system is it touching?</strong>
+            </p>
+            <p>
+              Changed symbols pulse the moment they land. Only the latest
+              change animates, and the rest of the graph dims around it for a
+              beat — so your eye goes exactly where the work is happening.
+              When nothing is changing, nothing moves.
+            </p>
+          </div>
+          <div class="feature-visual" data-reveal>
+            <canvas id="flow-canvas" class="vignette-canvas" aria-hidden="true"></canvas>
+            <p class="visually-hidden">
+              A call-flow graph: an entry point on the left fans out through
+              project functions to external packages, with particles flowing
+              along the call edges and a modified function pulsing amber.
+            </p>
+          </div>
+        </div>
+
+        <!-- ── feature 2: commit & PR review ─────────────────────────── -->
+        <div class="feature flip">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Commit &amp; PR review</p>
+            <h2>Review the shape of a change, not a wall of diff.</h2>
+            <p>
+              Point it at your uncommitted work, a commit, or this branch
+              against the one you'll merge into. AI dives into the actual
+              code and compiles <strong>per-file review notes with risk
+              levels</strong> — a one-line synopsis for every changed symbol,
+              ready before you open the PR.
+            </p>
+            <p>
+              A diff shows you text. This shows you which APIs broke, what's
+              new, what's gone, and how risky each piece is.
+            </p>
+          </div>
+          <div class="feature-visual" data-reveal>
+            <div class="panel" role="img" aria-label="Mockup of the Review notes pane: three changed files, each with a risk badge and an AI-written summary.">
+              <div class="panel-head">
+                <span>Review notes</span>
+                <span class="mono">main &larr; feature/cache</span>
+              </div>
+              <div class="panel-body">
+                <div class="file-row" data-reveal style="--i: 1">
+                  <div class="file-head">
+                    <span class="path">src/engine.py</span>
+                    <span class="chip medium">medium</span>
+                    <span class="delta"><span class="plus">+35</span> <span class="minus">&minus;3</span></span>
+                  </div>
+                  <p class="note"><span class="sym">rescan()</span> — now invalidates the symbol cache before re-walking, fixing stale results after a branch switch.</p>
+                </div>
+                <div class="file-row" data-reveal style="--i: 2">
+                  <div class="file-head">
+                    <span class="path">src/parser.py</span>
+                    <span class="chip high">high</span>
+                    <span class="delta"><span class="plus">+12</span> <span class="minus">&minus;8</span></span>
+                  </div>
+                  <p class="note"><span class="sym">parse(source, lang)</span> — signature changed: gained a <span class="sym">lang</span> parameter. Callers in 3 files updated; external callers will break.</p>
+                </div>
+                <div class="file-row" data-reveal style="--i: 3">
+                  <div class="file-head">
+                    <span class="path">src/model.py</span>
+                    <span class="chip low">low</span>
+                    <span class="delta"><span class="plus">+48</span> <span class="minus">&minus;32</span></span>
+                  </div>
+                  <p class="note"><span class="sym">class Cache</span> — new LRU cache keyed by AST hash; replaces the removed <span class="sym">to_json()</span> serialization path.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── feature 3: graphical + text ───────────────────────────── -->
+        <div class="feature">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">Pictures + prose</p>
+            <h2>Pictures and prose, side by side.</h2>
+            <p>
+              Colour and motion tell you <strong>where</strong>; the narrative
+              tells you <strong>what and why</strong>. A pink double-pulse
+              means an API broke — and the note beside it names the parameter
+              that changed and who calls it.
+            </p>
+            <p>
+              Symbol identity is a hash of the <strong>AST, not the source
+              text</strong> — so a formatter pass lights up nothing, and a
+              docstring edit counts. The graph never cries wolf.
+            </p>
+          </div>
+          <div class="feature-visual" data-reveal>
+            <div class="composite">
+              <canvas id="cluster-canvas" class="vignette-canvas" aria-hidden="true"></canvas>
+              <div class="narrative-card">
+                <span class="tag-sig">signature changed</span>
+                <p>
+                  <span class="sym">PyParser.symbols()</span> gained a
+                  <span class="sym">lang</span> parameter — an API-breaking
+                  change. Its two in-repo callers were updated in the same
+                  pass; the new <span class="sym">hash()</span> method backs
+                  the cache added in <span class="sym">model.py</span>.
+                </p>
+              </div>
+              <p class="visually-hidden">
+                A class node with four method nodes: one pulsing pink for a
+                signature change, one emerald for newly added — next to the
+                AI's written explanation of that exact change.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── feature 4: AI augmentation ────────────────────────────── -->
+        <div class="feature flip">
+          <div class="feature-copy" data-reveal>
+            <p class="eyebrow">AI augmentation</p>
+            <h2>An AI reviewer that never looks away.</h2>
+            <p>
+              While the agent works, a second AI narrates: a streamed
+              play-by-play of what the agent appears to be doing, where each
+              entry describes <strong>only what changed since the last
+              one</strong>. Watching Claude stops being boring the moment
+              someone is explaining the game.
+            </p>
+            <ul class="trust">
+              <li>one batched request per changeset</li>
+              <li>cached per symbol</li>
+              <li>key never reaches the frontend</li>
+              <li>fully functional without a key</li>
+            </ul>
+          </div>
+          <div class="feature-visual" data-reveal>
+            <div class="panel" data-typing role="img" aria-label="Mockup of the Narrative pane streaming AI commentary about the agent's work.">
+              <div class="panel-head">
+                <span>Narrative</span>
+                <span class="mono">live</span>
+              </div>
+              <div class="panel-body">
+                <div class="narrative-entry">
+                  <div class="stamp"><span class="phase implementing">implementing</span><span>14:32:07</span></div>
+                  <p class="line" data-type-text="Building a caching layer: added class Cache in model.py with get()/put(), keyed by AST hash."></p>
+                </div>
+                <div class="narrative-entry">
+                  <div class="stamp"><span class="phase wiring">wiring</span><span>14:32:41</span></div>
+                  <p class="line" data-type-text="rescan() now calls invalidate() before re-walking — wiring the new cache into the refresh path."></p>
+                </div>
+                <div class="narrative-entry">
+                  <div class="stamp"><span class="phase refactoring">refactoring</span><span>14:33:12</span></div>
+                  <p class="line" data-type-text="Removed the legacy to_json() serializer; its last caller went away with the cache change."></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── screenshot ───────────────────────────────────────────────── -->
+    <section class="showcase" aria-labelledby="shot-title">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>The real thing</p>
+        <h2 id="shot-title" data-reveal>Three panes. One picture of the work.</h2>
+        <p class="lede" data-reveal>
+          Narrative and review notes on the left. Structure in the middle —
+          repository to functions, changes lit up. Call flow on the right,
+          entry points to external packages. It replaces the graphical bits
+          of a modern IDE with the one view an agent workflow actually needs.
+        </p>
+        <figure data-reveal>
+          <div class="screenshot-frame">
+            <img
+              src="assets/screenshot.png"
+              srcset="assets/screenshot.png 1216w, assets/screenshot@2x.png 2432w"
+              sizes="(max-width: 1120px) 100vw, 1072px"
+              width="1216" height="693"
+              loading="lazy" decoding="async"
+              alt="Agent Monitor's full interface: AI review notes listing changed files with risk badges on the left, a force-directed structure graph with changed symbols highlighted in the middle, and a call-flow graph fanning from entry points to external packages on the right.">
+          </div>
+          <figcaption>Agent Monitor reviewing one of its own commits.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ── install ──────────────────────────────────────────────────── -->
+    <section aria-labelledby="install-title">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>Get started</p>
+        <h2 id="install-title" data-reveal>Running in a minute.</h2>
+
+        <div class="install-cards">
+          <div class="card" data-reveal style="--i: 1">
+            <h3>Download the app</h3>
+            <p>Native macOS app — no Python, no Node, nothing to install.</p>
+            <a class="btn btn-primary" href="https://github.com/sibblegp/agent-monitor/releases/latest">Download for macOS</a>
+            <p class="fine">Apple Silicon. Signed and notarized by Apple &mdash; opens like any Mac app.</p>
+          </div>
+          <div class="card" data-reveal style="--i: 2">
+            <h3>Run from source</h3>
+            <p>Python 3.10+ and git. Native window via Electron, or add <span class="mono">--browser</span>.</p>
+            <div class="code-block">
+              <button class="copy-btn" type="button" data-copy="git clone https://github.com/sibblegp/agent-monitor.git&#10;cd agent-monitor && ./run.sh" aria-live="polite">Copy</button>
+              <div><span class="dim">$</span> git clone https://github.com/sibblegp/agent-monitor.git</div>
+              <div><span class="dim">$</span> cd agent-monitor &amp;&amp; ./run.sh</div>
+            </div>
+            <p class="fine">No agent handy? <span class="mono">python tools/simulate_agent.py /tmp/demo-repo</span> plays a scripted editing session you can watch.</p>
+          </div>
+        </div>
+
+        <div class="steps">
+          <div class="step" data-reveal style="--i: 1">
+            <span class="num">1</span>
+            <span class="step-text"><strong>Point it at a repo</strong> Open any git repository — or one package inside a monorepo.</span>
+          </div>
+          <div class="step" data-reveal style="--i: 2">
+            <span class="num">2</span>
+            <span class="step-text"><strong>Let your agent loose</strong> Claude Code, Cursor, anything that edits files. It just watches the filesystem.</span>
+          </div>
+          <div class="step" data-reveal style="--i: 3">
+            <span class="num">3</span>
+            <span class="step-text"><strong>Watch, then review</strong> Follow the work live, then read the compiled review notes before you commit.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="footer-inner">
+        <a class="brand" href="#" aria-label="Agent Monitor — back to top">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Agent Monitor</span>
+        </a>
+        <p class="byline">Built by George Sibble — available for contract and AI engineering work.</p>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="https://github.com/sibblegp/agent-monitor">GitHub</a>
+          <a href="https://github.com/sibblegp/agent-monitor/blob/main/LICENSE">License</a>
+        </nav>
+      </div>
+      <ul class="legend" aria-label="Change-status colour legend">
+        <li><span class="swatch sw-added"></span>added</li>
+        <li><span class="swatch sw-modified"></span>modified</li>
+        <li><span class="swatch sw-signature"></span>signature changed</li>
+        <li><span class="swatch sw-removed"></span>removed</li>
+        <li><span class="swatch sw-external"></span>external</li>
+        <li><span class="swatch sw-entry"></span>entry point</li>
+      </ul>
+    </div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
