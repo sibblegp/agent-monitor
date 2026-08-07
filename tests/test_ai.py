@@ -622,3 +622,16 @@ def test_whole_file_units_get_a_real_diff():
     )
     diff = _slice_diff(old, new, change)
     assert "CHANGED HERE" in diff, f"the actual edit is missing from the diff:\n{diff}"
+
+
+def test_reference_tokens_never_reach_the_reader():
+    """`s7` addresses a symbol in the protocol; it names nothing on screen."""
+    from agent_monitor.ai.client import _scrub_refs
+
+    assert _scrub_refs("adds retry logic (`s3`)") == "adds retry logic"
+    assert _scrub_refs("touches the panel (`s4`, `s6`, `s12`)") == "touches the panel"
+    assert _scrub_refs("check `s1` before merging") == "check before merging"
+    # Real backticked code must survive untouched.
+    assert _scrub_refs("adds a `_usage_lock` field") == "adds a `_usage_lock` field"
+    assert _scrub_refs("renames `sha256` to `s3hash`") == "renames `sha256` to `s3hash`"
+    assert _scrub_refs(None) is None

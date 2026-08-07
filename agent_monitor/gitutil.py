@@ -347,6 +347,7 @@ def changed_files(
       live         working tree (staged + unstaged + untracked) vs HEAD
       commit       <ref>^ vs <ref>            (handles the root commit)
       branch       merge-base(<ref>, trunk) vs <ref>
+      against      merge-base(HEAD, <ref>) vs the working tree
       range        "a..b"
     """
     if not target.is_git:
@@ -400,6 +401,24 @@ def changed_files(
         name_status = _run(root, ["diff", "--name-status", "-M", "-z", base, ref])
         numstat = _run(root, ["diff", "--numstat", "-z", base, ref])
         untracked = []
+    elif mode == "against":
+        # Everything this branch has done since it left `ref`, working tree
+        # included. That's the review question — "what would this PR contain?" —
+        # which is not the same as `branch` mode's merge-base against trunk.
+        if not ref:
+            raise GitError("against mode requires a ref")
+        base = _text(root, ["merge-base", "HEAD", ref], check=False)
+        if not base:
+            # Falling back to the raw ref made the following diff fail quietly,
+            # and an empty diff reads as "nothing changed" — a wrong answer
+            # rather than a visible error.
+            raise GitError(f"no common history with {ref}")
+        head = None  # None = worktree, so uncommitted work counts
+        name_status = _run(root, ["diff", "--name-status", "-M", "-z", base])
+        numstat = _run(root, ["diff", "--numstat", "-z", base])
+        untracked = _split_z(
+            _run(root, ["ls-files", "--others", "--exclude-standard", "-z"], check=False)
+        )
     elif mode == "range":
         if not ref or ".." not in ref:
             raise GitError("range mode requires 'a..b'")
@@ -477,5 +496,28 @@ def head_info(root: str) -> tuple[str | None, str]:
 
 
 def branches(root: str) -> list[str]:
-    raw = _text(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], check=False)
-    return [b for b in raw.splitlines() if b.strip()]
+    """Local branches, then remote-tracking ones.
+
+    Remotes are included because the branch you actually want to review against
+    is usually `origin/main` — on a fresh clone, or a repo whose only local
+    branch is the one you're on, locals alone offer nothing to compare with.
+    """
+    local = _text(
+        root, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], check=False
+    ).splitlines()
+    # `%(symref)` is set only for symbolic refs. refs/remotes/origin/HEAD is one,
+    # and its short name is bare "origin" — not a branch anyone can diff against.
+    remote = _text(
+        root,
+        ["for-each-ref", "--format=%(refname:short)\t%(symref)", "refs/remotes"],
+        check=False,
+    ).splitlines()
+    seen = {b.strip() for b in local if b.strip()}
+    out = sorted(seen)
+    for line in remote:
+        name, _, symref = line.partition("\t")
+        name = name.strip()
+        if name and not symref.strip() and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out

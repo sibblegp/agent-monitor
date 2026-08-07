@@ -29,6 +29,9 @@ Rules:
 - The review note is 2-3 sentences for someone about to review this diff: what
   changed overall and what deserves attention. No bullet points.
 - Only reference symbols that appear in the input. Never invent identifiers.
+- The bracketed reference (`s1`, `s2`, ...) is an addressing token, not a name.
+  Use it in `id` fields ONLY. It means nothing to the reader, so it must never
+  appear in a summary, a reason, or the review note — name the symbol instead.
 - If a change is trivial or you cannot tell what it does, say so plainly rather
   than guessing.
 """
@@ -102,7 +105,10 @@ ANNOTATE_TOOL = {
             },
             "review_note": {
                 "type": "string",
-                "description": "2-3 sentences for a reviewer about to read this diff.",
+                "description": (
+                    "2-3 sentences for a reviewer about to read this diff. "
+                    "Name symbols, never the `s1`-style reference tokens."
+                ),
             },
         },
         "required": ["summaries", "risk", "themes", "review_note"],

@@ -53,10 +53,24 @@
   <main id="panes">
     <section class="pane pane-narrative" id="pane-narrative">
       <div class="pane-head">
-        <h2>Narrative</h2>
+        <div class="tabs" id="left-tabs" role="tablist">
+          <button class="tab is-active" data-tab="narrative" role="tab">Narrative</button>
+          <button class="tab" data-tab="review" role="tab">Review notes</button>
+        </div>
         <span class="pane-sub" id="narrative-sub"></span>
       </div>
-      <div id="narrative-list" class="narrative-list"></div>
+
+      <div id="narrative-list" class="narrative-list" data-panel="narrative"></div>
+
+      <div id="review-panel" class="review-panel" data-panel="review" hidden>
+        <div class="review-controls">
+          <select id="review-base" title="What to compare against">
+            <option value="">Uncommitted work (vs HEAD)</option>
+          </select>
+          <button id="review-refresh" class="btn" title="Rebuild the notes">↻</button>
+        </div>
+        <div id="review-body" class="review-body"></div>
+      </div>
     </section>
 
     <div id="splitter-narrative" class="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>

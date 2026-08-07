@@ -15,8 +15,10 @@ Design constraints that shaped this:
 from __future__ import annotations
 
 import difflib
+import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 from ..model import CHANGED_STATUSES, ChangeSet, RepoTarget
@@ -41,6 +43,26 @@ SYMBOLS_PER_BATCH = 15
 MAX_RETRIES_PER_SYMBOL = 2
 #: Themes are drawn as labelled hulls; past a handful they just overlap.
 MAX_THEMES = 5
+#: Batches in flight at once. Independent calls, so waiting on them serially
+#: is pure latency; kept modest to stay well clear of rate limits.
+MAX_CONCURRENT_BATCHES = 4
+
+
+#: `(\`s3\`)`-style leftovers, and a whole parenthetical made only of them.
+_REF_PAREN = re.compile(r"\s*\((?:\s*`?s\d+`?\s*[,;/]?)+\)")
+_REF_TOKEN = re.compile(r"`s\d+`")
+
+
+def _scrub_refs(text: str | None) -> str | None:
+    """Strip addressing tokens out of prose meant for a human.
+
+    The prompt says not to use them, but a token that leaks reads as noise the
+    reader can't resolve — `s7` names nothing they can see.
+    """
+    if not text:
+        return text
+    cleaned = _REF_TOKEN.sub("", _REF_PAREN.sub("", text))
+    return re.sub(r"\s{2,}", " ", cleaned).replace(" ,", ",").strip()
 
 
 def _resolver(refs: dict[str, Any]):
@@ -119,6 +141,7 @@ class AiAnnotator:
         #: How often the model has declined to describe a given symbol.
         self._misses: dict[tuple[str, str], int] = {}
         self._lock = threading.Lock()
+        self._usage_lock = threading.Lock()
         self._inflight = False
         self._pending_args = None
         self._disabled_reason: str | None = None
@@ -272,33 +295,48 @@ class AiAnnotator:
         risk: list[dict[str, Any]] = []
         themes: list[dict[str, Any]] = []
         note = ""
+
+        # Refer to symbols by a short opaque token rather than by node id.
+        # Given `sym:path/to/f.py::Klass.method` the model helpfully
+        # "normalises" the `sym:` prefix away, and every annotation then keyed a
+        # node that doesn't exist — so nothing showed on hover. A token it has
+        # no opinion about comes back verbatim.
+        plan = []
         for start in range(0, len(analysing), SYMBOLS_PER_BATCH):
             batch = analysing[start : start + SYMBOLS_PER_BATCH]
-
-            # Refer to symbols by a short opaque token rather than by node id.
-            # Given `sym:path/to/f.py::Klass.method` the model helpfully
-            # "normalises" the `sym:` prefix away, and every annotation then
-            # keyed a node that doesn't exist — so nothing showed on hover.
-            # A token it has no opinion about comes back verbatim.
             refs = {f"s{start + i + 1}": change for i, (change, _k) in enumerate(batch)}
             entries = [entry_for(change, ref) for ref, change in refs.items()]
-            part = self._request(
-                target, langs, files, entries, truncated if start == 0 else 0
-            )
+            plan.append((batch, refs, entries, truncated if start == 0 else 0))
+
+        # The batches don't depend on each other, and each is a multi-second
+        # round trip. Run them together: reviewing a whole branch went from
+        # minutes of sequential calls to roughly one call's wait.
+        if len(plan) > 1:
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_BATCHES) as pool:
+                parts = list(
+                    pool.map(
+                        lambda job: self._request(target, langs, files, job[2], job[3]),
+                        plan,
+                    )
+                )
+        else:
+            parts = [self._request(target, langs, files, job[2], job[3]) for job in plan]
+
+        for (batch, refs, _entries, _trunc), part in zip(plan, parts):
             resolve = _resolver(refs)
 
             for item in part.get("summaries", []):
                 node_id = resolve(item.get("id"))
                 if node_id:
-                    summaries.append({"id": node_id, "text": item.get("text")})
+                    summaries.append({"id": node_id, "text": _scrub_refs(item.get("text"))})
             for item in part.get("risk", []):
                 node_id = resolve(item.get("id"))
                 if node_id:
-                    risk.append({**item, "id": node_id})
+                    risk.append({**item, "id": node_id, "reason": _scrub_refs(item.get("reason"))})
             for theme in part.get("themes", []):
                 members = [resolve(m) for m in theme.get("members", [])]
                 themes.append({**theme, "members": [m for m in members if m]})
-            note = note or part.get("review_note", "")
+            note = note or _scrub_refs(part.get("review_note", "")) or ""
 
             # Cache only what actually came back. Marking a skipped symbol as
             # analysed burns it permanently: it never matches again, so it can
@@ -334,9 +372,27 @@ class AiAnnotator:
         }
         if truncated:
             result["truncated"] = truncated
-        self._last_themes = result["themes"]
-        self._last_note = note
+
+        # Themes describe the whole changeset, but a later call only carries the
+        # handful of symbols that were still uncached — so replacing outright
+        # made the themes collapse to whatever the last edit touched. Fold new
+        # ones into what's known; the cap keeps this from growing forever.
+        self._last_themes = _merge_themes(self._last_themes + result["themes"])
+        result["themes"] = self._last_themes
+        self._last_note = note or self._last_note
+        result["review_note"] = self._last_note
         return result
+
+    def reset(self) -> None:
+        """Forget everything learned about the current changeset.
+
+        Called when the subject changes wholesale — a different repo, a
+        different mode — so themes and notes from the old one don't bleed in.
+        """
+        self._cache.clear()
+        self._misses.clear()
+        self._last_themes = []
+        self._last_note = ""
 
     _last_themes: list[dict[str, Any]] = []
     _last_note: str = ""
@@ -400,6 +456,11 @@ class AiAnnotator:
         usage = getattr(response, "usage", None)
         if usage is None:
             return
+        # Batches run concurrently, so this is touched from several threads.
+        with self._usage_lock:
+            self._record_usage_locked(usage)
+
+    def _record_usage_locked(self, usage) -> None:
         self.usage["requests"] += 1
         self.usage["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
         self.usage["output_tokens"] += getattr(usage, "output_tokens", 0) or 0

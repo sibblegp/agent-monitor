@@ -304,3 +304,64 @@ def test_a_class_holding_a_changed_method_reads_as_changed(tmp_path: Path):
     cls = engine.graph.nodes[sym_id("src/k.py", "T")]
     assert cls.status in CHANGED_STATUSES, "class holding a changed method reads as unchanged"
     engine.close()
+
+
+# ── review notes ──────────────────────────────────────────────────────
+
+
+def test_against_mode_spans_a_branch_plus_the_working_tree(tmp_path: Path):
+    """A review must cover committed *and* uncommitted work on the branch."""
+    root = _demo_repo(tmp_path)
+    run = lambda *a: subprocess.run(["git", "-C", str(root), *a], check=True, capture_output=True)
+
+    # `git init` picks the trunk name from config, so ask rather than assume.
+    trunk = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    run("checkout", "-qb", "feature")
+    (root / "src" / "committed.py").write_text("def one():\n    return 1\n")
+    run("add", "-A")
+    run("commit", "-qm", "on the branch")
+    (root / "src" / "dirty.py").write_text("def two():\n    return 2\n")
+
+    target = gitutil.resolve_target(str(root))
+    changes, base = gitutil.changed_files(target, "against", trunk)
+    paths = {c.path for c in changes}
+    assert "src/committed.py" in paths, "committed branch work is missing"
+    assert "src/dirty.py" in paths, "uncommitted work is missing"
+    assert base, "no merge base resolved"
+
+
+def test_review_groups_notes_by_file(tmp_path: Path):
+    from agent_monitor.engine import Engine
+
+    root = _demo_repo(tmp_path)
+    (root / "src" / "a.py").write_text("def alpha():\n    return 2\n\ndef beta():\n    return 3\n")
+    (root / "notes.txt").write_text("hello\n")
+
+    engine = Engine()
+    engine.open(str(root))
+    engine._stop_watcher()
+
+    review = engine.review()
+    by_path = {g["path"]: g for g in review["groups"]}
+    assert set(by_path) == {"src/a.py", "notes.txt"}, by_path.keys()
+    assert review["counts"]["files"] == 2
+
+    names = {i["name"] for i in by_path["src/a.py"]["items"]}
+    assert "beta" in names, names
+    # An unparsed file is its own unit, not a container of symbols.
+    assert by_path["notes.txt"]["items"] == []
+    engine.close()
+
+
+def test_against_an_unrelated_ref_is_an_error_not_an_empty_review(tmp_path: Path):
+    """An unresolvable base used to produce an empty diff, reading as "no changes"."""
+    root = _demo_repo(tmp_path)
+    target = gitutil.resolve_target(str(root))
+    try:
+        gitutil.changed_files(target, "against", "no-such-branch")
+    except gitutil.GitError:
+        return
+    raise AssertionError("an unresolvable base silently reported no changes")

@@ -54,6 +54,8 @@ export const api = {
   recents: () => request('/api/recents'),
   commits: () => request('/api/commits'),
   branches: () => request('/api/branches'),
+  review: (against) =>
+    request(`/api/review?${new URLSearchParams(against ? { against } : {})}`),
   settings: (patch) => request('/api/settings', { method: 'POST', body: patch }),
 };
 

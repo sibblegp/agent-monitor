@@ -18,6 +18,7 @@ import { chooseDirectory, initOpenDialog, openInAppBrowser } from './ui/openDial
 import { renderFeed, renderLegend, setLiveState } from './ui/feed.js';
 import { hideTooltip, showTooltip } from './ui/inspector.js';
 import { initSettings, renderSettings, updateAiStatus } from './ui/settings.js';
+import { initReview, loadReview, markReviewStale, refreshBranches } from './ui/review.js';
 import {
   addEntry as addNarrativeEntry,
   applyDelta as applyNarrativeDelta,
@@ -47,6 +48,7 @@ const el = {
   splitter: document.getElementById('splitter'),
   splitterNarrative: document.getElementById('splitter-narrative'),
   paneNarrative: document.getElementById('pane-narrative'),
+  leftTabs: document.getElementById('left-tabs'),
   panes: document.getElementById('panes'),
   paneStructure: document.getElementById('pane-structure'),
   paneFlow: document.getElementById('pane-flow'),
@@ -362,6 +364,9 @@ function banner(text, kind = 'info', ms = 5200) {
 function applySnapshot(payload, { refit = false } = {}) {
   store.applySnapshot(payload, { animate: true });
   store.seedEventsFromChanges();
+  // Notes describe a diff; the diff just moved. Cheap to mark, and the tab is
+  // usually hidden — it rebuilds when someone actually looks at it.
+  markReviewStale();
   dirty = true;
   // `refit` marks a deliberate context switch (new repo, new mode, new filter),
   // which is the only time a full re-layout is wanted. A live edit must not
@@ -387,6 +392,8 @@ async function openRepo(path) {
     await api.open(path);
     const payload = await api.snapshot();
     applySnapshot(payload, { refit: true });
+    markReviewStale();
+    refreshBranches();
     banner(`Opened ${store.meta?.repo?.name ?? path}`, 'info', 2200);
   } catch (err) {
     banner(err instanceof ApiError ? err.message : String(err), 'error', 7000);
@@ -774,6 +781,30 @@ const live = new Live(
   (state) => setLiveState(state === 'open' && !store.paused ? 'live' : 'idle')
 );
 
+// ── left pane tabs ────────────────────────────────────────────────────
+
+/**
+ * Narrative and Review are two readings of the same work: one as it happens,
+ * one once it has settled. They share the pane because you want one or the
+ * other, never both at once.
+ */
+function selectLeftTab(name) {
+  for (const tab of el.leftTabs.querySelectorAll('.tab')) {
+    tab.classList.toggle('is-active', tab.dataset.tab === name);
+  }
+  for (const panel of el.paneNarrative.querySelectorAll('[data-panel]')) {
+    panel.hidden = panel.dataset.panel !== name;
+  }
+  // Notes cost an API round-trip and possibly an AI call, so they're built
+  // when the tab is first looked at rather than kept warm in the background.
+  if (name === 'review') loadReview();
+}
+
+el.leftTabs.addEventListener('click', (ev) => {
+  const tab = ev.target.closest('.tab');
+  if (tab) selectLeftTab(tab.dataset.tab);
+});
+
 // ── boot ──────────────────────────────────────────────────────────────
 
 async function boot() {
@@ -799,6 +830,8 @@ async function boot() {
     dirty = true;
   });
 
+  initReview();
+
   initNarrative({
     onFocus: (id) => {
       store.selected = id;
@@ -818,6 +851,7 @@ async function boot() {
     if (state.has_repo) {
       const payload = await api.snapshot();
       applySnapshot(payload, { refit: true });
+      refreshBranches();
     } else {
       updateChrome();
       renderFeed(store);

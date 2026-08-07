@@ -9,8 +9,11 @@ of the system did this touch?**
 
 Three panes, updating as the agent works:
 
-- **Narrative** — a streamed, running commentary on what the agent is doing
-  (optional; needs an API key).
+- **Narrative / Review notes** — two tabs. *Narrative* is a streamed, running
+  commentary on what the agent is doing; *Review notes* compiles everything the
+  AI has said about a change into one file-by-file list, for either your
+  uncommitted work or this branch against another one you pick. (Optional; both
+  need an API key.)
 - **Structure** — repository → directories → files → classes → functions, as a
   force-directed graph. Changed things light up and pulse.
 - **Flow** — the static call graph. Entry points on the left, fanning right
@@ -167,7 +170,9 @@ changeset with:
 - a one-line summary per changed symbol,
 - a risk level and reason,
 - named themes over the changeset, drawn as labelled hulls behind their members,
-- a copyable review note for the whole diff,
+- a copyable review note for the whole diff, plus the **Review notes** tab: the
+  same annotations gathered per file with risk badges, comparing either the
+  working tree or this branch against a branch you choose,
 - and a running commentary in the **Narrative** pane on the left, streamed as
   it's written: a play-by-play of what the agent appears to be doing, where each
   entry describes only what changed since the last one.

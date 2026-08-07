@@ -240,6 +240,16 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             "current": eng.target.branch,
         }
 
+    @app.get("/api/review")
+    async def review(against: str | None = None) -> dict[str, Any]:
+        """Compiled review notes for the working tree, or for this branch vs one.
+
+        Runs off the event loop: it may issue several AI calls and re-diff a
+        long branch, and the live view must keep updating while it does.
+        """
+        eng = _require_repo()
+        return await asyncio.to_thread(eng.review, against or None)
+
     # ---- settings -----------------------------------------------------
 
     @app.post("/api/settings")

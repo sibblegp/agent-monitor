@@ -73,6 +73,8 @@ class Engine:
             self.parsed = {}
             self._ai = None
             self._annotations = {}
+            if self.ai is not None:
+                self.ai.reset()
             if self.narrator is not None:
                 self.narrator.reset()
             self.mode, self.ref = "live", None
@@ -87,6 +89,8 @@ class Engine:
             self.ref = ref
             self._ai = None
             self._annotations = {}
+            if self.ai is not None:
+                self.ai.reset()
             if self.narrator is not None:
                 self.narrator.reset()
             self.rescan()
@@ -457,6 +461,152 @@ class Engine:
     # ------------------------------------------------------------------
     # views
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # review notes
+    # ------------------------------------------------------------------
+
+    def build_changeset(self, mode: str, ref: str | None) -> ChangeSet:
+        """Compute a changeset for any comparison without disturbing the view.
+
+        `rescan` parses the whole tree because it has to build a graph. A review
+        only needs the diff, so this parses just the files that differ — which
+        is what makes reviewing a long branch affordable.
+        """
+        if self.target is None or not self.target.is_git:
+            return ChangeSet(mode=mode)
+        root = self.target.root
+        changes, base = gitutil.changed_files(self.target, mode, ref)
+
+        symbol_changes = []
+        for change in changes:
+            if detect_lang(change.path) not in PARSEABLE:
+                continue
+            old_path = change.old_path or change.path
+
+            new_pf = new_raw = None
+            if change.status != "removed":
+                new_pf = self._parse_one_side(root, change.new_ref, change.path)
+                new_raw = gitutil.read_side(root, change.new_ref, change.path)
+
+            old_pf = old_raw = None
+            if change.status != "added" and change.old_ref:
+                old_pf = self._parse_one_side(root, change.old_ref, old_path)
+                old_raw = gitutil.read_blob(root, change.old_ref, old_path)
+
+            symbol_changes.extend(
+                diff_file(
+                    change.path, old_pf, new_pf,
+                    old_text=_decode(old_raw), new_text=_decode(new_raw),
+                )
+            )
+        return ChangeSet(mode=mode, base=base, files=changes, symbols=symbol_changes)
+
+    def review(self, against: str | None = None) -> dict[str, Any]:
+        """Everything the AI has said about a comparison, grouped by file.
+
+        `against` names a branch to compare this one with; without it the
+        subject is the uncommitted work in the tree.
+        """
+        if self.target is None:
+            return {"error": "no repository open"}
+
+        mode, ref = ("against", against) if against else ("live", None)
+        try:
+            changeset = self.build_changeset(mode, ref)
+        except gitutil.GitError as exc:
+            return {"error": str(exc)}
+
+        units = changeset.units()
+        annotations: dict[str, dict[str, Any]] = {}
+        note, themes, error = "", [], None
+        pending = 0
+
+        if self.ai is not None and self.ai.settings.ai_enabled and self.ai.available and units:
+            langs: dict[str, int] = {}
+            for parsed in self.parsed.values():
+                langs[parsed.lang] = langs.get(parsed.lang, 0) + 1
+            try:
+                result = self.ai.annotate(
+                    self.target, changeset, langs, sorted(self.parsed),
+                    self._read_side, self._changeset_hashes(changeset),
+                )
+            except Exception as exc:  # additive only — never break the review
+                result, error = None, f"{type(exc).__name__}: {exc}"
+            if result:
+                for item in result.get("summaries", []):
+                    annotations.setdefault(item["id"], {})["text"] = item.get("text")
+                for item in result.get("risk", []):
+                    entry = annotations.setdefault(item["id"], {})
+                    entry["risk"] = item.get("level")
+                    entry["reason"] = item.get("reason")
+                note = result.get("review_note", "")
+                themes = result.get("themes", [])
+                # Per-call symbol cap. Say so rather than quietly describing
+                # less than the diff contains; refreshing picks up the rest,
+                # and everything already described is cached.
+                pending = result.get("truncated", 0)
+        elif units:
+            error = "AI insights are off — showing the diff without commentary."
+
+        by_path: dict[str, dict[str, Any]] = {}
+        for change in changeset.files:
+            by_path[change.path] = {
+                "path": change.path, "status": change.status,
+                "added": change.added, "removed": change.removed, "items": [],
+            }
+        for unit in units:
+            group = by_path.get(unit.path)
+            if group is None:
+                continue
+            note_for = annotations.get(unit.node_id, {})
+            if unit.kind == "file":
+                # A whole-file unit *is* its group — don't list it as a child.
+                group["text"] = note_for.get("text")
+                group["risk"] = note_for.get("risk")
+                group["reason"] = note_for.get("reason")
+                continue
+            group["items"].append({
+                "id": unit.node_id, "name": unit.qualname, "kind": unit.kind,
+                "status": unit.status, "added": unit.added, "removed": unit.removed,
+                "text": note_for.get("text"),
+                "risk": note_for.get("risk"), "reason": note_for.get("reason"),
+            })
+
+        groups = sorted(by_path.values(), key=lambda g: g["path"])
+        return {
+            "against": against,
+            "pending": pending,
+            "base": changeset.base,
+            "branch": self.target.branch,
+            "note": note,
+            "themes": themes,
+            "error": error,
+            "counts": {
+                "files": len(changeset.files),
+                "symbols": sum(len(g["items"]) for g in groups),
+                "added": sum(c.added for c in changeset.files),
+                "removed": sum(c.removed for c in changeset.files),
+                "described": sum(1 for a in annotations.values() if a.get("text")),
+            },
+            "groups": groups,
+        }
+
+    def _changeset_hashes(self, changeset: ChangeSet) -> dict[str, str]:
+        """Cache keys for an arbitrary changeset, mirroring `_symbol_hashes`."""
+        import hashlib  # noqa: PLC0415
+
+        out: dict[str, str] = {}
+        for unit in changeset.units():
+            if unit.kind == "file":
+                raw = gitutil.read_side(self.target.root, None, unit.path) if self.target else None
+                out[unit.node_id] = (
+                    f"gone:{unit.status}" if raw is None
+                    else hashlib.sha1(raw).hexdigest()[:16]
+                )
+            else:
+                out[unit.node_id] = f"{unit.status}:{unit.added}:{unit.removed}"
+        return out
 
     def changed_node_ids(self) -> set[str]:
         return {
