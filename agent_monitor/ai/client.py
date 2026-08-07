@@ -420,6 +420,13 @@ def _slice_diff(old_text: str | None, new_text: str | None, change) -> str:
     and into whatever is defined next, which reads as though far more changed
     than actually did.
     """
+    if change.line is None:
+        # A whole-file unit (a shell script, a README, a stylesheet) has no span
+        # to window on. Windowing from the top compared the first 60 lines of
+        # each side and found nothing whenever the edit was further down, so the
+        # model was asked to describe a change it had been shown no trace of —
+        # and duly reported that the diff was unavailable.
+        return _unified(old_text, new_text, change.qualname)
     if change.status == "added":
         return _window(new_text, change.line, change.added, "+")
     if change.status == "removed":

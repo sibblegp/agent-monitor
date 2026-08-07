@@ -136,6 +136,11 @@ briefly. When nothing is changing, the app renders zero frames.
 In the **Changes** view the changed subgraph keeps its call-flow particles
 running continuously, since that subgraph is the entire subject.
 
+**Changes means only changes.** The structure pane shows what actually changed
+plus the directories and files holding it — nothing else. Call context is a
+flow-pane concern, so the **context** slider widens the flow pane by that many
+call hops around each change (0 = changed only), recomputed as you drag it.
+
 ### Controls
 
 | Key | Action |

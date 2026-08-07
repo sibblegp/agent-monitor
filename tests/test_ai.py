@@ -602,3 +602,23 @@ def test_symbols_are_referenced_by_opaque_token(tmp_path: Path):
     assert sent, "nothing was sent"
     assert all(re.fullmatch(r"s\d+", ref) for ref in sent), sent
     engine.close()
+
+
+def test_whole_file_units_get_a_real_diff():
+    """Regression: an edit past the top of the file produced an empty diff.
+
+    Whole-file units carry no line number, and the windowing path compared the
+    first 60 lines of each side — so any edit below that looked like no change
+    at all, and the synopsis came back as "no textual diff available".
+    """
+    from agent_monitor.ai.client import _slice_diff
+    from agent_monitor.model import SymbolChange
+
+    old = "\n".join(f"line {i}" for i in range(200))
+    new = old.replace("line 150", "line 150 CHANGED HERE")
+    change = SymbolChange(
+        path="README.md", qualname="README.md", name="README.md",
+        kind="file", status="modified", line=None, added=1, removed=1,
+    )
+    diff = _slice_diff(old, new, change)
+    assert "CHANGED HERE" in diff, f"the actual edit is missing from the diff:\n{diff}"
