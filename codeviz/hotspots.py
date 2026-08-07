@@ -19,7 +19,7 @@ class HotspotRanker:
                 index.setdefault(edge.dst, []).append(edge.src)
         return index
 
-    def blast_radius(self, node_id: str, limit: int = 400) -> int:
+    def blast_radius(self, node_id: str, limit: int = 400, *, include_self: bool = False) -> int:
         seen: set[str] = set()
         stack = [node_id]
         while stack and len(seen) < limit:
@@ -28,7 +28,7 @@ class HotspotRanker:
                 if caller not in seen:
                     seen.add(caller)
                     stack.append(caller)
-        return len(seen)
+        return len(seen) + (1 if include_self else 0)
 
     def ranked(self) -> list[tuple[str, int]]:
         scores = [
@@ -38,3 +38,22 @@ class HotspotRanker:
         ]
         scores.sort(key=lambda pair: pair[1], reverse=True)
         return scores
+
+
+def summarize(ranker: HotspotRanker) -> str:
+    top = ranker.ranked()[:3]
+    return ", ".join(f"{i}={n}" for i, n in top)
+
+
+def churn_score(added: int, removed: int) -> float:
+    """Weighted churn used to rank hotspots."""
+    return added * 1.0 + removed * 1.4
+
+
+def risk_band(score: float) -> str:
+    """Bucket a churn score into a coarse risk band."""
+    if score > 80:
+        return "high"
+    if score > 25:
+        return "medium"
+    return "low"

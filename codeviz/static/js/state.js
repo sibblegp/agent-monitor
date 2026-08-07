@@ -18,6 +18,9 @@ export const CHANGED = new Set(['added', 'modified', 'signature_changed', 'remov
  */
 export const HOT_MS = 9000;
 
+/** How long the rest of the graph stays dimmed after a change lands. */
+export const SPOTLIGHT_MS = 1800;
+
 function makeFx() {
   return {
     born: 0,
@@ -65,6 +68,17 @@ export class Store {
 
   get hasLiveActivity() {
     return this.recent.size > 0 && performance.now() - this.recentAt < HOT_MS;
+  }
+
+  /**
+   * 1 → 0 over SPOTLIGHT_MS after a change lands. Everything that didn't just
+   * change dims by this much, so the eye is pulled straight to the edit even if
+   * it's a single small node in a busy graph.
+   */
+  get spotlight() {
+    if (!this.recent.size) return 0;
+    const t = (performance.now() - this.recentAt) / SPOTLIGHT_MS;
+    return t >= 1 ? 0 : 1 - t;
   }
 
   on(fn) {

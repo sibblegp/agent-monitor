@@ -14,12 +14,12 @@ import {
   clamp,
   drawLabel,
   drawPulses,
-  glowDot,
+  glowNode,
   hashUnit,
   heat,
   isChanged,
   rgba,
-  ringDot,
+  ringShape,
 } from './effects.js';
 import { HOT_MS } from '../state.js';
 
@@ -37,6 +37,7 @@ export class StructureRenderer {
     const ctx = scene.begin();
     const view = scene.viewBounds();
     const highlight = store.highlightSet(store.selected || store.hover);
+    const spotlight = highlight ? 0 : store.spotlight;
 
     // Screen-space occupancy grid, reset each frame. Labels claim cells in
     // priority order so a dense cluster shows the changed symbols' names
@@ -46,7 +47,7 @@ export class StructureRenderer {
 
     this._drawThemes(ctx, now, highlight);
     this._drawLinks(ctx, view, highlight);
-    this._drawNodes(ctx, now, view, highlight);
+    this._drawNodes(ctx, now, view, highlight, spotlight);
     this._flushLabels(ctx);
 
     scene.end();
@@ -178,7 +179,7 @@ export class StructureRenderer {
 
   // ── nodes ──────────────────────────────────────────────────────────
 
-  _drawNodes(ctx, now, view, highlight) {
+  _drawNodes(ctx, now, view, highlight, spotlight = 0) {
     const { layout, store, scene } = this;
     const scale = scene.camera.scale;
     const showAllLabels = scale > 1.15;
@@ -204,6 +205,9 @@ export class StructureRenderer {
       const dimmed = highlight && !highlight.has(node.id);
 
       let alpha = dimmed ? 0.16 : 1;
+      // Everything that didn't just change fades back for a moment, so a
+      // single small edit still reads instantly in a crowded graph.
+      if (spotlight > 0 && !recent) alpha *= 1 - spotlight * 0.62;
       let color = this._colorFor(node);
       let radius = entry.r;
 
@@ -218,7 +222,7 @@ export class StructureRenderer {
       // Entry-point functions get a cyan halo so the flow roots are findable
       // in the structure pane too.
       if (node.is_entry && !changed && node.kind !== 'file') {
-        ringDot(ctx, entry.x, entry.y, radius + 3.5, COLORS.entry, {
+        ringShape(ctx, node.kind, entry.x, entry.y, radius + 3.5, COLORS.entry, {
           alpha: alpha * 0.45,
           width: 1,
         });
@@ -235,16 +239,25 @@ export class StructureRenderer {
           : node.kind === 'file'
             ? 0.1
             : 0.04;
-      glowDot(ctx, entry.x, entry.y, radius, color, { alpha, glow: dimmed ? 0 : glow });
+      glowNode(ctx, node.kind, entry.x, entry.y, radius, color, {
+        alpha,
+        glow: dimmed ? 0 : glow,
+      });
 
       // A file that's expanded gets a faint containing ring, so you can tell
       // "this file has its guts showing" from "this is a lone file node".
       if (node.kind === 'file' && layout.expanded.has(node.id)) {
-        ringDot(ctx, entry.x, entry.y, radius + 2.5, color, { alpha: alpha * 0.3, width: 1 });
+        ringShape(ctx, node.kind, entry.x, entry.y, radius + 2.5, color, {
+          alpha: alpha * 0.35,
+          width: 1,
+        });
       }
 
       if (node.risk === 'high' && !dimmed) {
-        ringDot(ctx, entry.x, entry.y, radius + 5.5, COLORS.removed, { alpha: 0.5, width: 1.2 });
+        ringShape(ctx, node.kind, entry.x, entry.y, radius + 5.5, COLORS.removed, {
+          alpha: 0.5,
+          width: 1.2,
+        });
       }
 
       drawPulses(ctx, fx, entry.x, entry.y, radius, now);

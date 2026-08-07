@@ -102,6 +102,100 @@ export function blinkAlpha(fx, now) {
 
 // ── drawing primitives ────────────────────────────────────────────────
 
+/**
+ * Per-kind silhouettes, so structure is readable without relying on colour
+ * (which is already carrying change status) or on labels (which vanish when
+ * zoomed out):
+ *
+ *   root / dir   rounded square      class     hexagon
+ *   file         document (folded)   method    diamond
+ *   function     circle              external  circle, drawn hollow
+ */
+export function nodePath(ctx, kind, x, y, r) {
+  ctx.beginPath();
+  switch (kind) {
+    case 'root':
+    case 'dir': {
+      const s = r * 1.72;
+      ctx.roundRect(x - s / 2, y - s / 2, s, s, Math.max(2, r * 0.3));
+      break;
+    }
+    case 'file': {
+      const w = r * 1.55;
+      const h = r * 1.95;
+      const fold = Math.max(2, r * 0.5);
+      const l = x - w / 2;
+      const t = y - h / 2;
+      ctx.moveTo(l, t);
+      ctx.lineTo(l + w - fold, t);
+      ctx.lineTo(l + w, t + fold);
+      ctx.lineTo(l + w, t + h);
+      ctx.lineTo(l, t + h);
+      ctx.closePath();
+      break;
+    }
+    case 'class': {
+      const rr = r * 1.18;
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        const px = x + Math.cos(a) * rr;
+        const py = y + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+    case 'method': {
+      const d = r * 1.38;
+      ctx.moveTo(x, y - d);
+      ctx.lineTo(x + d, y);
+      ctx.lineTo(x, y + d);
+      ctx.lineTo(x - d, y);
+      ctx.closePath();
+      break;
+    }
+    default:
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+  }
+}
+
+/** Filled node in its kind's shape, with an optional additive glow. */
+export function glowNode(ctx, kind, x, y, radius, color, { alpha = 1, glow = 1, hollow = false } = {}) {
+  if (glow > 0.01) {
+    const reach = Math.min(radius * (2.2 + glow * 1.6), 46);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, reach);
+    grad.addColorStop(0, rgba(color, 0.34 * glow * alpha));
+    grad.addColorStop(0.45, rgba(color, 0.09 * glow * alpha));
+    grad.addColorStop(1, rgba(color, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, reach, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  nodePath(ctx, kind, x, y, radius);
+  if (hollow) {
+    ctx.strokeStyle = rgba(color, alpha);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = rgba(color, alpha);
+    ctx.fill();
+  }
+}
+
+/** Outline in the node's own shape — used for entry haloes and risk rings. */
+export function ringShape(ctx, kind, x, y, radius, color, { alpha = 1, width = 1.2 } = {}) {
+  nodePath(ctx, kind, x, y, radius);
+  ctx.strokeStyle = rgba(color, alpha);
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
 export function glowDot(ctx, x, y, radius, color, { alpha = 1, glow = 1 } = {}) {
   if (glow > 0.01) {
     // Glow radius is capped in absolute terms, not just as a multiple of the
@@ -142,7 +236,7 @@ export function ringDot(ctx, x, y, radius, color, { alpha = 1, width = 1.4 } = {
  */
 export function drawPulses(ctx, fx, x, y, radius, now) {
   if (!fx.pulses.length) return;
-  const DURATION = 620;
+  const DURATION = 950;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (let i = fx.pulses.length - 1; i >= 0; i--) {
@@ -159,9 +253,9 @@ export function drawPulses(ctx, fx, x, y, radius, now) {
       if (shifted <= 0) continue;
       const eased = ease.outCubic(shifted);
       ctx.beginPath();
-      ctx.arc(x, y, radius + eased * 34, 0, Math.PI * 2);
-      ctx.strokeStyle = rgba(color, (1 - shifted) * 0.5);
-      ctx.lineWidth = 2 - shifted * 1.4;
+      ctx.arc(x, y, radius + eased * 58, 0, Math.PI * 2);
+      ctx.strokeStyle = rgba(color, (1 - shifted) * 0.75);
+      ctx.lineWidth = 2.6 - shifted * 1.8;
       ctx.stroke();
     }
   }

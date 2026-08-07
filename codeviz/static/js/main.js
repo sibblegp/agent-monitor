@@ -185,6 +185,63 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+/** Don't hijack the view if the user touched either pane this recently. */
+const IDLE_BEFORE_AUTOFOCUS_MS = 4000;
+/** Keep this much world-space context around the change, so it isn't a blind zoom. */
+const FOCUS_MIN_EXTENT = 460;
+
+function userIsDriving() {
+  const now = performance.now();
+  return (
+    now - structureScene.lastInteraction < IDLE_BEFORE_AUTOFOCUS_MS ||
+    now - flowScene.lastInteraction < IDLE_BEFORE_AUTOFOCUS_MS
+  );
+}
+
+function padBox(box, minExtent) {
+  if (!box) return null;
+  const cx = (box.minX + box.maxX) / 2;
+  const cy = (box.minY + box.maxY) / 2;
+  const halfW = Math.max((box.maxX - box.minX) / 2, minExtent / 2);
+  const halfH = Math.max((box.maxY - box.minY) / 2, minExtent / 2);
+  return { minX: cx - halfW, minY: cy - halfH, maxX: cx + halfW, maxY: cy + halfH };
+}
+
+/**
+ * Glide both panes to frame whatever just changed.
+ *
+ * This is the point of the whole tool: an edit landing off-screen or two pixels
+ * wide is an edit you don't notice. Skipped entirely while the user is panning,
+ * zooming, or inspecting, because yanking the view out from under someone is
+ * worse than missing one update.
+ */
+function focusRecentChange() {
+  if (!store.recent.size || userIsDriving()) return;
+
+  const structurePoints = [];
+  const flowPoints = [];
+  for (const id of store.recent) {
+    const s = forceLayout.get(id);
+    if (s) structurePoints.push({ x: s.x, y: s.y });
+    const f = layeredLayout.get(id);
+    if (f) flowPoints.push({ x: f.tx, y: f.ty });
+    // Include the parent so a lone new symbol is framed with its file.
+    const parent = store.nodes.get(id)?.parent;
+    const ps = parent && forceLayout.get(parent);
+    if (ps) structurePoints.push({ x: ps.x, y: ps.y });
+  }
+
+  const sBox = padBox(boundsOf(structurePoints), FOCUS_MIN_EXTENT);
+  if (sBox) {
+    structureScene.camera.fitTo(sBox, structureScene.width, structureScene.height, 90);
+  }
+  const fBox = padBox(boundsOf(flowPoints), FOCUS_MIN_EXTENT);
+  if (fBox) {
+    flowScene.camera.fitTo(fBox, flowScene.width, flowScene.height, 90);
+  }
+  dirty = true;
+}
+
 function fitAll(immediate = false) {
   const structurePoints = forceLayout.points();
   if (structurePoints.length) {
@@ -265,11 +322,21 @@ function applySnapshot(payload, { refit = false } = {}) {
   store.applySnapshot(payload, { animate: true });
   store.seedEventsFromChanges();
   dirty = true;
-  forceLayout.sync(true);
-  layeredLayout.sync(true);
+  // `refit` marks a deliberate context switch (new repo, new mode, new filter),
+  // which is the only time a full re-layout is wanted. A live edit must not
+  // re-run the whole simulation, or the entire picture drifts because one
+  // function appeared.
+  forceLayout.sync(refit);
+  layeredLayout.sync(refit);
   if (refit) needsFit = true;
   updateChrome();
   renderFeed(store);
+
+  // Bring the change on screen. Deferred a beat so the layout has placed any
+  // newly-arrived nodes before we try to frame them.
+  if (!refit && store.recent.size) {
+    setTimeout(focusRecentChange, 90);
+  }
 }
 
 async function openRepo(path) {
@@ -351,7 +418,11 @@ function togglePause() {
   store.paused = !store.paused;
   el.pause.classList.toggle('is-active', store.paused);
   el.pause.textContent = store.paused ? '▶' : '⏸';
+  el.pause.title = store.paused ? 'Resume live updates (space)' : 'Pause live updates (space)';
   setLiveState(store.paused ? 'paused' : 'live');
+  // Tell the backend too, so a paused window stops analysing rather than
+  // analysing and throwing the result away.
+  api.pause(store.paused).catch(() => {});
 }
 
 el.fit.addEventListener('click', () => fitAll());

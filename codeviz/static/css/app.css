@@ -194,9 +194,11 @@ html, body {
 .feed-list li {
   display: flex; align-items: baseline; gap: 8px;
   padding: 2px 0; color: var(--text-dim);
-  animation: slideIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
   white-space: nowrap;
 }
+/* Only rows appearing for the first time animate. Applying this to every row
+   made the whole feed re-play its entrance on each update. */
+.feed-list li.is-new { animation: slideIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1); }
 @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
 .feed-list .fdot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .feed-list .fname { color: var(--text); font-weight: 600; }
@@ -211,9 +213,24 @@ html, body {
 .feed-list .frisk-low { background: rgba(61, 220, 132, 0.14); color: #7ce8ac; }
 .feed-empty { color: var(--text-faint); font-style: italic; }
 
-.legend { display: grid; gap: 3px; font-size: 10.5px; color: var(--text-faint); padding-top: 2px; }
-.legend div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.legend {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(5, auto);
+  gap: 2px 16px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  padding-top: 2px;
+  align-content: start;
+}
+.legend div { display: flex; align-items: center; gap: 6px; white-space: nowrap; height: 15px; }
+.legend i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.legend canvas { flex: none; }
+.legend .legend-title {
+  font-size: 9px; letter-spacing: 1.1px; text-transform: uppercase;
+  color: #414c5b; font-weight: 700; margin-top: 1px;
+}
 
 /* ───────────────────────────── tooltip ───────────────────────────── */
 

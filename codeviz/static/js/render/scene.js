@@ -108,6 +108,8 @@ export class Scene {
     this.handlers = handlers;
     /** @type {Array<{id:string,x:number,y:number,r:number}>} filled by the renderer each frame */
     this.hitboxes = [];
+    /** Timestamp of the last deliberate user input, so auto-focus can yield. */
+    this.lastInteraction = 0;
     this._dragging = false;
     this._moved = 0;
     this._last = { x: 0, y: 0 };
@@ -125,6 +127,10 @@ export class Scene {
     this.canvas.height = Math.round(this.height * this.dpr);
   }
 
+  _touch() {
+    this.lastInteraction = performance.now();
+  }
+
   _bind() {
     const el = this.canvas;
 
@@ -133,6 +139,7 @@ export class Scene {
       this._moved = 0;
       this._last = { x: ev.clientX, y: ev.clientY };
       el.style.cursor = 'grabbing';
+      this._touch();
     });
 
     window.addEventListener('mousemove', (ev) => {
@@ -142,11 +149,13 @@ export class Scene {
         this._moved += Math.abs(dx) + Math.abs(dy);
         this.camera.panBy(dx, dy);
         this._last = { x: ev.clientX, y: ev.clientY };
+        this._touch();
         return;
       }
       if (ev.target !== el) return;
       const hit = this.pick(ev);
       el.style.cursor = hit ? 'pointer' : 'grab';
+      if (hit) this._touch();
       this.handlers.onHover?.(hit, ev);
     });
 
@@ -157,6 +166,7 @@ export class Scene {
     });
 
     el.addEventListener('click', (ev) => {
+      this._touch();
       if (this._moved > 4) return; // that was a pan, not a click
       this.handlers.onPick?.(this.pick(ev), ev);
     });
@@ -170,6 +180,7 @@ export class Scene {
         const rect = el.getBoundingClientRect();
         const factor = Math.pow(0.999, ev.deltaY);
         this.camera.zoomAt(ev.clientX - rect.left, ev.clientY - rect.top, factor);
+        this._touch();
       },
       { passive: false }
     );

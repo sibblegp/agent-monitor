@@ -16,12 +16,12 @@ import {
   drawEdgeParticles,
   drawLabel,
   drawPulses,
-  glowDot,
+  glowNode,
   hashUnit,
   heat,
   isChanged,
   rgba,
-  ringDot,
+  ringShape,
 } from './effects.js';
 import { HOT_MS } from '../state.js';
 
@@ -54,10 +54,11 @@ export class FlowRenderer {
     const { scene, layout, store } = this;
     const ctx = scene.begin();
     const highlight = store.highlightSet(store.selected || store.hover);
+    const spotlight = highlight ? 0 : store.spotlight;
     const view = scene.viewBounds(240);
 
     this._drawEdges(ctx, now, view, highlight);
-    this._drawNodes(ctx, now, view, highlight);
+    this._drawNodes(ctx, now, view, highlight, spotlight);
     this._drawLayerCaptions(ctx);
 
     scene.end();
@@ -102,7 +103,7 @@ export class FlowRenderer {
     }
   }
 
-  _drawNodes(ctx, now, view, highlight) {
+  _drawNodes(ctx, now, view, highlight, spotlight = 0) {
     const { layout, store, scene } = this;
     const showLabels = scene.camera.scale > 0.45;
 
@@ -118,6 +119,9 @@ export class FlowRenderer {
       const dimmed = highlight && !highlight.has(node.id);
 
       let alpha = dimmed ? 0.14 : 1;
+      // Everything that didn't just change fades back for a moment, so a
+      // single small edit still reads instantly in a crowded graph.
+      if (spotlight > 0 && !recent) alpha *= 1 - spotlight * 0.62;
       let radius = entry.r;
       const color = changed
         ? COLORS[node.status] || COLORS.modified
@@ -133,21 +137,31 @@ export class FlowRenderer {
 
       // External packages read as hollow rings — they're not your code.
       if (node.kind === 'external') {
-        ringDot(ctx, entry.x, entry.y, radius, COLORS.external, { alpha: alpha * 0.85, width: 1.3 });
+        glowNode(ctx, 'external', entry.x, entry.y, radius, COLORS.external, {
+          alpha: alpha * 0.85,
+          glow: 0,
+          hollow: true,
+        });
       } else {
-        const glow = changed ? 0.6 + hot * 0.9 : node.is_entry ? 0.35 : 0.08;
-        glowDot(ctx, entry.x, entry.y, radius, color, { alpha, glow: dimmed ? 0 : glow });
+        const glow = changed ? 0.45 + hot * 0.9 : node.is_entry ? 0.3 : 0.06;
+        glowNode(ctx, node.kind, entry.x, entry.y, radius, color, {
+          alpha,
+          glow: dimmed ? 0 : glow,
+        });
       }
 
       if (node.is_entry && node.kind !== 'external') {
-        ringDot(ctx, entry.x, entry.y, radius + 4, COLORS.entry, {
+        ringShape(ctx, node.kind, entry.x, entry.y, radius + 4, COLORS.entry, {
           alpha: alpha * 0.5,
           width: 1,
         });
       }
 
       if (node.risk === 'high' && !dimmed) {
-        ringDot(ctx, entry.x, entry.y, radius + 6, COLORS.removed, { alpha: 0.45, width: 1.1 });
+        ringShape(ctx, node.kind, entry.x, entry.y, radius + 6, COLORS.removed, {
+          alpha: 0.45,
+          width: 1.1,
+        });
       }
 
       drawPulses(ctx, fx, entry.x, entry.y, radius, now);

@@ -114,12 +114,16 @@ export class ForceLayout {
     // Distinguish "the graph actually changed shape" from "only statuses
     // changed". During live editing the latter is the common case, and
     // reheating hard for it makes the whole layout lurch on every keystroke.
-    const sameShape =
-      ids.size === this.pos.size && [...ids].every((id) => this.pos.has(id));
+    // Whether the layout had come to rest *before* this update. Captured up
+    // front, because the reheat below would otherwise make it look unsettled
+    // and unfreeze the whole graph — defeating the point of freezing.
+    const wasSettled = this.alpha < 0.02;
+    const hadLayout = this.pos.size > 0;
+    const arrived = shown.filter((n) => !this.pos.has(n.id));
+    const departed = [...this.pos.keys()].filter((id) => !ids.has(id));
+    const sameShape = arrived.length === 0 && departed.length === 0;
 
-    for (const id of [...this.pos.keys()]) {
-      if (!ids.has(id)) this.pos.delete(id);
-    }
+    for (const id of departed) this.pos.delete(id);
 
     for (const node of shown) {
       let entry = this.pos.get(node.id);
@@ -156,7 +160,59 @@ export class ForceLayout {
       }
     }
 
-    this.reheat(sameShape ? 0.05 : 0.85);
+    this._setMobility(shown, arrived, departed, hadLayout && wasSettled, force);
+    this.reheat(sameShape ? 0.05 : 0.7);
+  }
+
+  /**
+   * Decide which nodes are allowed to move this pass.
+   *
+   * A single new symbol used to reheat the entire simulation, so the whole
+   * picture drifted every time an agent saved a file — the motion said
+   * "everything changed" when one function did. Now an incremental update only
+   * unfreezes the arrivals and the family they landed in; the rest of the graph
+   * holds still. Frozen nodes still push back, they just don't get integrated,
+   * so newcomers make room without dragging the layout around them.
+   */
+  _setMobility(shown, arrived, departed, canFreeze, fullRelayout) {
+    // First layout, a deliberate re-layout (filter switch, expand/collapse), or
+    // a simulation still finding its shape: everything stays free.
+    //
+    // `canFreeze` matters more than it looks. The websocket pushes a snapshot
+    // moments after the initial REST load, and freezing on that second
+    // snapshot locked the graph mid-relaxation — leaving a cramped,
+    // overlapping clump that never got to spread out.
+    if (!canFreeze || fullRelayout) {
+      for (const entry of this.pos.values()) entry.frozen = false;
+      return;
+    }
+
+    if (arrived.length === 0 && departed.length === 0) {
+      // Status-only update: nothing needs to move at all.
+      for (const entry of this.pos.values()) entry.frozen = true;
+      return;
+    }
+
+    const mobile = new Set();
+    const touchedParents = new Set();
+    for (const node of arrived) {
+      mobile.add(node.id);
+      if (node.parent) touchedParents.add(node.parent);
+    }
+    for (const id of departed) {
+      const parent = this.store.nodes.get(id)?.parent;
+      if (parent) touchedParents.add(parent);
+    }
+
+    // Let the containing node and its other children shuffle to make room.
+    for (const parent of touchedParents) {
+      mobile.add(parent);
+      for (const node of shown) {
+        if (node.parent === parent) mobile.add(node.id);
+      }
+    }
+
+    for (const [id, entry] of this.pos) entry.frozen = !mobile.has(id);
   }
 
   reheat(value = 0.9) {
@@ -184,6 +240,12 @@ export class ForceLayout {
   step() {
     if (this.alpha < 0.004 || this.visible.length === 0) return false;
     const entries = [...this.pos.values()];
+    // Nothing is allowed to move — skip the whole simulation rather than
+    // burning frames computing forces that get discarded.
+    if (entries.every((e) => e.frozen)) {
+      this.alpha = 0;
+      return false;
+    }
 
     // ── repulsion via spatial hash ─────────────────────────────────
     const grid = new Map();
@@ -195,6 +257,7 @@ export class ForceLayout {
     }
 
     for (const e of entries) {
+      if (e.frozen) continue; // still repels others, just isn't pushed itself
       const cx = Math.round(e.x / CELL);
       const cy = Math.round(e.y / CELL);
       for (let ox = -1; ox <= 1; ox++) {
@@ -234,14 +297,23 @@ export class ForceLayout {
       const fx = dx * k;
       const fy = dy * k;
       // Parents are heavier, so children do most of the moving.
-      b.vx -= fx * 0.75;
-      b.vy -= fy * 0.75;
-      a.vx += fx * 0.25;
-      a.vy += fy * 0.25;
+      if (!b.frozen) {
+        b.vx -= fx * 0.75;
+        b.vy -= fy * 0.75;
+      }
+      if (!a.frozen) {
+        a.vx += fx * 0.25;
+        a.vy += fy * 0.25;
+      }
     }
 
     // ── gravity toward origin, and collision relaxation ────────────
     for (const e of entries) {
+      if (e.frozen) {
+        e.vx = 0;
+        e.vy = 0;
+        continue;
+      }
       e.vx -= e.x * 0.0016 * this.alpha;
       e.vy -= e.y * 0.0016 * this.alpha;
       e.vx *= 0.84;
@@ -251,6 +323,7 @@ export class ForceLayout {
     }
 
     for (const e of entries) {
+      if (e.frozen) continue;
       const cx = Math.round(e.x / CELL);
       const cy = Math.round(e.y / CELL);
       for (let ox = -1; ox <= 1; ox++) {
@@ -265,11 +338,15 @@ export class ForceLayout {
             const d2 = dx * dx + dy * dy;
             if (d2 >= min * min || d2 === 0) continue;
             const dist = Math.sqrt(d2);
-            const push = ((dist - min) / dist) * 0.5;
+            // A frozen neighbour absorbs none of the correction, so the
+            // mobile node moves the full distance out of the overlap.
+            const push = ((dist - min) / dist) * (other.frozen ? 1 : 0.5);
             e.x += dx * push;
             e.y += dy * push;
-            other.x -= dx * push;
-            other.y -= dy * push;
+            if (!other.frozen) {
+              other.x -= dx * push;
+              other.y -= dy * push;
+            }
           }
         }
       }

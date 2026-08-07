@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 from . import gitutil
+from .watcher import RepoWatcher
 from .analysis import parse_source
 from .analysis.registry import detect_lang, ts_unavailable_reason
 from .cache import ParseCache
@@ -33,7 +34,7 @@ MAX_FILES = 20000
 class Engine:
     """Holds the analyzed state of one repository."""
 
-    def __init__(self, on_event: Callable[[str, dict[str, Any]], None] | None = None) -> None:
+    def __init__(self, on_update: Callable[[], None] | None = None) -> None:
         self.target: RepoTarget | None = None
         self.mode: str = "live"
         self.ref: str | None = None
@@ -44,8 +45,13 @@ class Engine:
         self.warnings: list[str] = []
         self.last_scan_ms: int = 0
         self.truncated: int = 0
-        self._on_event = on_event
+        self.paused: bool = False
         self._ai: dict[str, Any] | None = None
+
+        #: Called (from a worker thread) after a watcher-triggered rescan.
+        self.on_update = on_update
+        self._watcher: RepoWatcher | None = None
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # opening
@@ -53,19 +59,64 @@ class Engine:
 
     def open(self, path: str, scope: str | None = None) -> RepoTarget:
         target = gitutil.resolve_target(path, scope)
-        self.target = target
-        self.cache.clear()
-        self.parsed = {}
-        self._ai = None
-        self.mode, self.ref = "live", None
-        self.rescan()
+        with self._lock:
+            self._stop_watcher()
+            self.target = target
+            self.cache.clear()
+            self.parsed = {}
+            self._ai = None
+            self.mode, self.ref = "live", None
+            self.rescan()
+        self._start_watcher()
         return target
 
     def set_mode(self, mode: str, ref: str | None = None) -> None:
-        self.mode = mode
-        self.ref = ref
-        self._ai = None
-        self.rescan()
+        with self._lock:
+            self.mode = mode
+            self.ref = ref
+            self._ai = None
+            self.rescan()
+        # Only the working tree can change under us; a commit or branch diff is
+        # immutable, so stop watching when we're not looking at `live`.
+        if mode == "live":
+            self._start_watcher()
+        else:
+            self._stop_watcher()
+
+    # ------------------------------------------------------------------
+    # live watching
+    # ------------------------------------------------------------------
+
+    def _start_watcher(self) -> None:
+        if self.target is None or self.mode != "live":
+            return
+        if self._watcher is not None:
+            return
+        self._watcher = RepoWatcher(self.target, self._on_files_changed)
+        self._watcher.start()
+
+    def _stop_watcher(self) -> None:
+        if self._watcher is not None:
+            self._watcher.stop()
+            self._watcher = None
+
+    @property
+    def watch_mode(self) -> str | None:
+        return self._watcher.mode if self._watcher else None
+
+    def _on_files_changed(self, paths: set[str]) -> None:
+        """Watcher callback — runs on a worker thread."""
+        if self.paused:
+            return
+        with self._lock:
+            if self.target is None or self.mode != "live":
+                return
+            self.rescan()
+        if self.on_update is not None:
+            self.on_update()
+
+    def close(self) -> None:
+        self._stop_watcher()
 
     # ------------------------------------------------------------------
     # parsing
@@ -285,6 +336,8 @@ class Engine:
             "langs": langs,
             "warnings": self.warnings,
             "scan_ms": self.last_scan_ms,
+            "watching": self.watch_mode,
+            "paused": self.paused,
             "cache": self.cache.stats(),
             "changed_files": len(self.changeset.files),
             "changed_symbols": sum(

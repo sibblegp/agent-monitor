@@ -60,6 +60,25 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
     app.state.hub = hub
     app.state.token = token
 
+    # The watcher fires on a worker thread; hop back onto the event loop to
+    # broadcast. Captured once at startup so the thread doesn't have to guess.
+    @app.on_event("startup")
+    async def _capture_loop() -> None:
+        loop = asyncio.get_running_loop()
+
+        def notify() -> None:
+            asyncio.run_coroutine_threadsafe(
+                hub.broadcast("snapshot", engine.snapshot()), loop
+            )
+
+        engine.on_update = notify
+        # A repo opened via the CLI starts watching only once the loop exists.
+        engine._start_watcher()
+
+    @app.on_event("shutdown")
+    async def _teardown() -> None:
+        engine.close()
+
     # ---- auth ---------------------------------------------------------
 
     @app.middleware("http")
@@ -132,6 +151,16 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
         payload = engine.snapshot()
         await hub.broadcast("snapshot", payload)
         return {"ok": True}
+
+    @app.post("/api/pause")
+    async def pause(body: dict[str, Any]) -> dict[str, Any]:
+        # Pausing server-side too, so a paused window stops doing analysis work
+        # rather than just discarding the results.
+        engine.paused = bool((body or {}).get("paused"))
+        if not engine.paused and engine.target is not None:
+            await asyncio.to_thread(engine.rescan)
+            await hub.broadcast("snapshot", engine.snapshot())
+        return {"paused": engine.paused}
 
     # ---- pickers ------------------------------------------------------
 

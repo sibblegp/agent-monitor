@@ -48,6 +48,7 @@ export const api = {
   open: (path, scope) => request('/api/open', { method: 'POST', body: { path, scope } }),
   setMode: (mode, ref) => request('/api/mode', { method: 'POST', body: { mode, ref } }),
   refresh: () => request('/api/refresh', { method: 'POST' }),
+  pause: (paused) => request('/api/pause', { method: 'POST', body: { paused } }),
   fs: (path, hidden) =>
     request(`/api/fs?${new URLSearchParams({ ...(path ? { path } : {}), hidden: hidden ? '1' : '' })}`),
   recents: () => request('/api/recents'),
