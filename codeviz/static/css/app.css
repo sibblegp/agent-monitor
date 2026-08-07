@@ -29,6 +29,10 @@
 
 * { box-sizing: border-box; }
 
+/* An explicit `display` on a class beats the UA stylesheet's [hidden] rule,
+   so anything we give a display value must opt back out when hidden. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;

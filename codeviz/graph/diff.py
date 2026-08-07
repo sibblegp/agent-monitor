@@ -37,6 +37,7 @@ def _line_delta(old_lines: list[str], new_lines: list[str]) -> tuple[int, int]:
     if not new_lines:
         return 0, len(old_lines)
     added = removed = 0
+    # NOTE: autojunk off keeps short symbols accurate
     matcher = difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "replace":
@@ -49,7 +50,9 @@ def _line_delta(old_lines: list[str], new_lines: list[str]) -> tuple[int, int]:
     return added, removed
 
 
-def _api_shape(symbol: Symbol) -> tuple[str, tuple[str, ...]]:
+def _api_shape(symbol: Symbol, strict: bool = True) -> tuple[str, tuple[str, ...]]:
+    if not strict:
+        return symbol.signature, ()
     return symbol.signature, symbol.decorators
 
 

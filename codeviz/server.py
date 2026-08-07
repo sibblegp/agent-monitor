@@ -71,7 +71,11 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             )
             if supplied != token:
                 return JSONResponse({"error": "bad token"}, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        # Local single-user app: never let a browser hold a stale asset across
+        # an upgrade. There is nothing to gain from caching over loopback.
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
 
     def _require_repo() -> Engine:
         if engine.target is None:

@@ -33,15 +33,35 @@ export class ForceLayout {
     this.version = -1;
   }
 
-  /** Which files should show their symbols right now. */
+  /**
+   * Which files should show their symbols right now.
+   *
+   * Changed files auto-expand, but only the busiest AUTO_EXPAND_CAP of them.
+   * On a first commit — or any sweeping refactor — every file is "changed", and
+   * expanding all of them at once buries the signal in a wall of nodes. The cap
+   * keeps attention on the files with the most churn; the rest stay collapsed
+   * and can be opened by clicking.
+   */
   computeExpansion() {
+    const AUTO_EXPAND_CAP = 12;
     const next = new Set();
+    const candidates = [];
+
     for (const node of this.store.nodes.values()) {
       if (node.kind !== 'file') continue;
-      const auto = node.status && node.status !== 'unchanged';
-      if (this.expanded.has(node.id) && !this.manualCollapse.has(node.id)) next.add(node.id);
-      if (auto && !this.manualCollapse.has(node.id)) next.add(node.id);
+      if (this.manualCollapse.has(node.id)) continue;
+      // A file the user opened by hand stays open regardless of the cap.
+      if (this.expanded.has(node.id)) next.add(node.id);
+      if (node.status && node.status !== 'unchanged') candidates.push(node);
     }
+
+    candidates.sort(
+      (a, b) => (b.added || 0) + (b.removed || 0) - ((a.added || 0) + (a.removed || 0))
+    );
+
+    this.autoExpandSkipped = Math.max(0, candidates.length - AUTO_EXPAND_CAP);
+    for (const node of candidates.slice(0, AUTO_EXPAND_CAP)) next.add(node.id);
+
     this.expanded = next;
   }
 
@@ -118,9 +138,15 @@ export class ForceLayout {
 
     // Containment links only — call edges are the flow pane's business.
     this.links = [];
+    const siblings = new Map();
     for (const node of shown) {
       if (node.parent && this.pos.has(node.parent)) {
-        this.links.push({ a: node.parent, b: node.id, node });
+        siblings.set(node.parent, (siblings.get(node.parent) || 0) + 1);
+      }
+    }
+    for (const node of shown) {
+      if (node.parent && this.pos.has(node.parent)) {
+        this.links.push({ a: node.parent, b: node.id, node, siblings: siblings.get(node.parent) || 1 });
       }
     }
 
@@ -131,15 +157,21 @@ export class ForceLayout {
     this.alpha = Math.max(this.alpha, value);
   }
 
+  /**
+   * Orbit radius grows with sibling count. A file with 20 methods needs a much
+   * bigger ring than one with 2, otherwise dense files collapse into an
+   * unreadable knot — which is exactly where the interesting changes are.
+   */
   _linkDistance(link) {
     const kind = link.node.kind;
-    if (kind === 'dir') return 120;
-    if (kind === 'file') return 74;
-    return 34; // symbols orbit close to their file
+    const crowd = Math.sqrt(Math.max(1, link.siblings || 1));
+    if (kind === 'dir') return 150 + crowd * 26;
+    if (kind === 'file') return 90 + crowd * 16;
+    return 30 + crowd * 13;
   }
 
   _linkStrength(link) {
-    return link.node.kind === 'dir' ? 0.06 : 0.11;
+    return link.node.kind === 'dir' ? 0.05 : 0.085;
   }
 
   /** One physics tick. */
@@ -175,7 +207,7 @@ export class ForceLayout {
               d2 = dx * dx + dy * dy;
             }
             const dist = Math.sqrt(d2);
-            const force = (260 * (e.r + other.r) * 0.06) / d2;
+            const force = (900 + (e.r + other.r) * 55) / d2;
             e.vx += (dx / dist) * force * this.alpha;
             e.vy += (dy / dist) * force * this.alpha;
           }

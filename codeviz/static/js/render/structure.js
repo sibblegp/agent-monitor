@@ -38,12 +38,66 @@ export class StructureRenderer {
     const view = scene.viewBounds();
     const highlight = store.highlightSet(store.selected || store.hover);
 
+    // Screen-space occupancy grid, reset each frame. Labels claim cells in
+    // priority order so a dense cluster shows the changed symbols' names
+    // rather than whichever node happened to be drawn last.
+    this._labelCells = new Set();
+    this._labelQueue = [];
+
     this._drawThemes(ctx, now, highlight);
     this._drawLinks(ctx, view, highlight);
     this._drawNodes(ctx, now, view, highlight);
+    this._flushLabels(ctx);
 
     scene.end();
     this._drawOverlay(ctx);
+  }
+
+  /** Draw queued labels highest-priority first, skipping any that collide. */
+  _flushLabels(ctx) {
+    const scale = this.scene.camera.scale;
+    const CELL_W = 74;
+    const CELL_H = 15;
+
+    this._labelQueue.sort((a, b) => b.priority - a.priority);
+
+    for (const item of this._labelQueue) {
+      const screen = this.scene.camera.toScreen(item.x, item.y);
+      // Off-screen labels shouldn't consume cells that on-screen ones need.
+      if (
+        screen.x < -80 ||
+        screen.y < -20 ||
+        screen.x > this.scene.width + 80 ||
+        screen.y > this.scene.height + 20
+      ) {
+        continue;
+      }
+
+      const width = Math.max(1, Math.round((item.text.length * item.size * 0.62) / CELL_W));
+      const col = Math.floor(screen.x / CELL_W);
+      const row = Math.floor(screen.y / CELL_H);
+
+      let free = true;
+      for (let c = col - Math.floor(width / 2); c <= col + Math.ceil(width / 2); c++) {
+        if (this._labelCells.has(`${c},${row}`)) {
+          free = false;
+          break;
+        }
+      }
+      // Always-show labels (hover, selection, search) ignore collisions —
+      // the thing you're pointing at must be readable.
+      if (!free && !item.force) continue;
+
+      for (let c = col - Math.floor(width / 2); c <= col + Math.ceil(width / 2); c++) {
+        this._labelCells.add(`${c},${row}`);
+      }
+
+      drawLabel(ctx, item.x, item.y, item.text, {
+        color: item.color,
+        alpha: item.alpha,
+        size: item.size / scale > 22 ? item.size : item.size,
+      });
+    }
   }
 
   // ── AI change themes, drawn as soft hulls behind their members ──────
@@ -167,7 +221,17 @@ export class StructureRenderer {
         });
       }
 
-      const glow = changed ? 0.55 + hot * 0.9 : node.kind === 'file' ? 0.12 : 0.05;
+      // Containers only ever carry a *rolled-up* status from their children, so
+      // they must not glow like a real change — otherwise one changed method
+      // lights up its class, file, directory, and the repo root all at once.
+      const isContainer = node.kind === 'root' || node.kind === 'dir';
+      const glow = isContainer
+        ? 0.08
+        : changed
+          ? 0.5 + hot * 0.8
+          : node.kind === 'file'
+            ? 0.1
+            : 0.04;
       glowDot(ctx, entry.x, entry.y, radius, color, { alpha, glow: dimmed ? 0 : glow });
 
       // A file that's expanded gets a faint containing ring, so you can tell
@@ -184,21 +248,33 @@ export class StructureRenderer {
 
       scene.hitboxes.push({ id: node.id, x: entry.x, y: entry.y, r: radius });
 
+      // Queue the label instead of drawing it now, so collisions can be
+      // resolved globally by priority once every node is placed.
+      const pinned =
+        store.hover === node.id || store.selected === node.id || store.searchHits.has(node.id);
       const labelWorth =
+        pinned ||
         changed ||
         node.kind === 'root' ||
         node.kind === 'dir' ||
-        store.hover === node.id ||
-        store.selected === node.id ||
-        store.searchHits.has(node.id) ||
         (showAllLabels && node.kind === 'file');
 
       if (labelWorth && !dimmed) {
         const size = node.kind === 'root' ? 12 : node.kind === 'dir' ? 10.5 : 10;
-        drawLabel(ctx, entry.x, entry.y - radius - 9, node.name, {
+        const priority =
+          (pinned ? 1000 : 0) +
+          (changed ? 500 : 0) +
+          (node.kind === 'root' ? 400 : node.kind === 'dir' ? 300 : 0) +
+          Math.min(99, node.size);
+        this._labelQueue.push({
+          x: entry.x,
+          y: entry.y - radius - 9,
+          text: node.name,
           color: changed ? color : COLORS.dim,
-          alpha: clamp(dimmed ? 0.2 : 0.92, 0, 1),
+          alpha: clamp(0.92, 0, 1),
           size,
+          priority,
+          force: pinned,
         });
       }
     }

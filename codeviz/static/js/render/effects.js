@@ -103,16 +103,20 @@ export function blinkAlpha(fx, now) {
 // ── drawing primitives ────────────────────────────────────────────────
 
 export function glowDot(ctx, x, y, radius, color, { alpha = 1, glow = 1 } = {}) {
-  if (glow > 0) {
+  if (glow > 0.01) {
+    // Glow radius is capped in absolute terms, not just as a multiple of the
+    // node. Without the cap, a few large container nodes produce ~100px
+    // gradients that additively wash the entire cluster in one color.
+    const reach = Math.min(radius * (2.2 + glow * 1.6), 46);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, radius * (3.2 + glow * 2.4));
-    grad.addColorStop(0, rgba(color, 0.42 * glow * alpha));
-    grad.addColorStop(0.45, rgba(color, 0.12 * glow * alpha));
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, reach);
+    grad.addColorStop(0, rgba(color, 0.34 * glow * alpha));
+    grad.addColorStop(0.45, rgba(color, 0.09 * glow * alpha));
     grad.addColorStop(1, rgba(color, 0));
     ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(x, y, radius * (3.2 + glow * 2.4), 0, Math.PI * 2);
+    ctx.arc(x, y, reach, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }

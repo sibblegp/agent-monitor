@@ -71,7 +71,8 @@ const flowScene = new Scene(document.getElementById('canvas-flow'), {
 const structureRenderer = new StructureRenderer(structureScene, forceLayout, store);
 const flowRenderer = new FlowRenderer(flowScene, layeredLayout, store);
 
-let needsFit = true;
+let needsFit = true; // rough fit as soon as anything exists
+let settleFit = 0; // deadline for the second fit, once the force sim calms down
 
 // ── interaction ───────────────────────────────────────────────────────
 
@@ -136,6 +137,16 @@ function frame(now) {
   if (needsFit && forceLayout.points().length) {
     fitAll(true);
     needsFit = false;
+    // The first fit runs against a layout that hasn't relaxed yet, so it
+    // always frames the wrong box. Schedule a second one for when the
+    // simulation has calmed (or give up after 4s if it never fully settles).
+    settleFit = now + 4000;
+  }
+
+  if (settleFit && (forceLayout.alpha < 0.05 || now > settleFit)) {
+    settleFit = 0;
+    fitAll(false);
+    updateChrome();
   }
 
   structureRenderer.draw(now);
@@ -183,8 +194,12 @@ function updateChrome() {
   }
 
   const visibleStructure = forceLayout.points().length;
+  const skipped = forceLayout.autoExpandSkipped || 0;
   el.structureSub.textContent = repo
-    ? `${visibleStructure} nodes${forceLayout.expanded.size ? ` · ${forceLayout.expanded.size} expanded` : ''}`
+    ? `${visibleStructure} nodes` +
+      (forceLayout.expanded.size ? ` · ${forceLayout.expanded.size} expanded` : '') +
+      // Never silently hold something back — say so, and how to see it.
+      (skipped ? ` · ${skipped} more changed files collapsed (click to open)` : '')
     : '';
   el.flowSub.textContent = repo
     ? `${layeredLayout.nodes.length} nodes · ${layeredLayout.edges.length} calls` +
@@ -407,6 +422,25 @@ function resizeScenes() {
   structureScene.resize();
   flowScene.resize();
 }
+
+/**
+ * Resizing the canvas alone leaves the camera framing the old viewport, so the
+ * graph ignores newly available space. Re-fit after the resize settles, and
+ * give the force sim a nudge so it actually spreads into the new area rather
+ * than just being rescaled.
+ */
+let resizeTimer = null;
+const observer = new ResizeObserver(() => {
+  resizeScenes();
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    forceLayout.reheat(0.4);
+    fitAll();
+    updateChrome();
+  }, 160);
+});
+observer.observe(el.paneStructure);
+observer.observe(el.paneFlow);
 window.addEventListener('resize', resizeScenes);
 
 // ── search ────────────────────────────────────────────────────────────

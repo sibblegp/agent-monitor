@@ -33,6 +33,9 @@ class _LRU:
     def clear(self) -> None:
         self._data.clear()
 
+    def peek(self, key):
+        return self._data.get(key)
+
     def __len__(self) -> int:
         return len(self._data)
 
