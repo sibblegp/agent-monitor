@@ -337,7 +337,7 @@ class Engine:
             p.lang in ("typescript", "javascript") for p in parsed.values()
         ):
             self.warnings.append(
-                "JS/TS shown as files only — install extras: pip install 'codeviz[ts]'"
+                "JS/TS shown as files only — install extras: pip install 'agent-monitor[ts]'"
             )
 
         self.last_scan_ms = int((time.perf_counter() - started) * 1000)

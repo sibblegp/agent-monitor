@@ -782,4 +782,4 @@ async function boot() {
 boot();
 
 // Expose a tiny surface for debugging from the devtools console.
-window.__codeviz = { store, forceLayout, layeredLayout, structureScene, flowScene, isElectron };
+window.__agentMonitor = { store, forceLayout, layeredLayout, structureScene, flowScene, isElectron };

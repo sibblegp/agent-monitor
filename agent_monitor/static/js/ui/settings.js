@@ -99,7 +99,7 @@ export function initSettings(handler) {
       el.keyStatus.textContent = 'Add an API key to enable AI insights.';
       return;
     }
-    if (turningOn && !window.__codevizAiConsent) {
+    if (turningOn && !window.__agentMonitorAiConsent) {
       const ok = confirm(
         'Enable AI insights?\n\n' +
           'The diffs of changed symbols in the current scope will be sent to the ' +
@@ -107,7 +107,7 @@ export function initSettings(handler) {
           'Nothing else is sent, and the visualization works fully without this.'
       );
       if (!ok) return;
-      window.__codevizAiConsent = true;
+      window.__agentMonitorAiConsent = true;
     }
     push({ ai_enabled: turningOn });
   });

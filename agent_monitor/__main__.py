@@ -21,7 +21,7 @@ from .gitutil import GitError
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="codeviz",
+        prog="agent-monitor",
         description="Live structure & flow visualizer for AI-agent code changes.",
     )
     parser.add_argument(
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.mode != "live":
                 engine.set_mode(args.mode, args.ref)
         except (GitError, OSError) as exc:
-            print(f"codeviz: {exc}", file=sys.stderr)
+            print(f"agent-monitor: {exc}", file=sys.stderr)
             return 2
 
     # Stable across restarts so an already-open tab keeps working.
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         sock.bind((args.host, args.port))
     except OSError as exc:
-        print(f"codeviz: cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
+        print(f"agent-monitor: cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 2
     port = sock.getsockname()[1]
 

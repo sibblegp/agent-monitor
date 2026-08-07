@@ -54,7 +54,7 @@ class Hub:
 
 
 def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
-    app = FastAPI(title="CodeViz", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Agent Monitor", docs_url=None, redoc_url=None)
     hub = Hub()
     app.state.engine = engine
     app.state.settings = settings
@@ -94,7 +94,7 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
     async def token_gate(request: Request, call_next):
         path = request.url.path
         if path.startswith("/api"):
-            supplied = request.headers.get("x-codeviz-token") or request.query_params.get(
+            supplied = request.headers.get("x-agent-monitor-token") or request.query_params.get(
                 "token"
             )
             if supplied != token:

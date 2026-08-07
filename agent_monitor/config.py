@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-APP = "codeviz"
+APP = "agent-monitor"
 
 
 def config_dir() -> Path:

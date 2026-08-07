@@ -1,8 +1,8 @@
 {
-  "name": "codeviz-shell",
+  "name": "agent-monitor-shell",
   "version": "0.1.0",
   "private": true,
-  "description": "Native window for CodeViz — spawns the Python backend and points a BrowserWindow at it",
+  "description": "Native window for Agent Monitor — spawns the Python backend and points a BrowserWindow at it",
   "main": "main.js",
   "scripts": {
     "start": "electron ."

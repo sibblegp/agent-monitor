@@ -85,7 +85,7 @@ class AiAnnotator:
             import anthropic  # noqa: PLC0415
         except ImportError as exc:
             raise AiUnavailable(
-                "the `anthropic` package isn't installed — pip install 'codeviz[ai]'"
+                "the `anthropic` package isn't installed — pip install 'agent-monitor[ai]'"
             ) from exc
         key = self.settings.api_key
         if not key:

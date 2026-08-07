@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codeviz"
+name = "agent-monitor"
 version = "0.1.0"
 description = "Live structure & flow visualizer for AI-agent code changes"
 requires-python = ">=3.10"
@@ -22,10 +22,10 @@ ts = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
 all = ["anthropic>=0.40", "tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
 
 [project.scripts]
-codeviz = "codeviz.__main__:main"
+agent-monitor = "agent_monitor.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["codeviz*"]
+include = ["agent_monitor*"]
 
 [tool.setuptools.package-data]
-codeviz = ["static/**/*"]
+agent_monitor = ["static/**/*"]

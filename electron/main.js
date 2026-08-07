@@ -1,5 +1,5 @@
 /**
- * CodeViz native shell.
+ * Agent Monitor native shell.
  *
  * All the real work is Python. This process spawns the backend, learns its port
  * from a one-line JSON handshake on stdout, and points a window at it. The
@@ -19,14 +19,14 @@ const ROOT = path.join(__dirname, '..');
 // Render natively on Wayland (Hyprland) instead of going through XWayland.
 // Must be set before `whenReady`.
 app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
-app.setName('CodeViz');
+app.setName('Agent Monitor');
 
 let backend = null;
 let win = null;
 let ready = null; // { port, token, url }
 let quitting = false;
 
-/** Prefer the project's virtualenv, then a `codeviz` on PATH, then bare python. */
+/** Prefer the project's virtualenv, then a `agent_monitor` on PATH, then bare python. */
 function pythonCandidates() {
   const isWin = process.platform === 'win32';
   const venv = isWin
@@ -41,7 +41,7 @@ function pythonCandidates() {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const [exe, ...fallbacks] = pythonCandidates();
-    const args = ['-m', 'codeviz', '--port', '0', '--no-browser'];
+    const args = ['-m', 'agent_monitor', '--port', '0', '--no-browser'];
 
     // Open whatever the user passed on the command line, if anything.
     const target = process.argv.slice(app.isPackaged ? 1 : 2).find((a) => !a.startsWith('-'));
@@ -91,12 +91,12 @@ function startBackend() {
     });
 
     // Surface Python errors instead of showing a blank window.
-    child.stderr.on('data', (chunk) => process.stderr.write(`[codeviz] ${chunk}`));
+    child.stderr.on('data', (chunk) => process.stderr.write(`[agent-monitor] ${chunk}`));
 
     child.on('exit', (code) => {
       if (!settled) fail(new Error(`backend exited with code ${code}`));
       else if (!quitting) {
-        dialog.showErrorBox('CodeViz', `The analysis backend stopped (exit ${code}).`);
+        dialog.showErrorBox('Agent Monitor', `The analysis backend stopped (exit ${code}).`);
         app.quit();
       }
     });
@@ -128,12 +128,12 @@ function startBackendWith(candidates, args) {
         /* keep waiting */
       }
     });
-    child.stderr.on('data', (chunk) => process.stderr.write(`[codeviz] ${chunk}`));
+    child.stderr.on('data', (chunk) => process.stderr.write(`[agent-monitor] ${chunk}`));
   });
 }
 
 function send(command, payload) {
-  win?.webContents.send('codeviz:command', command, payload ?? null);
+  win?.webContents.send('agentmon:command', command, payload ?? null);
 }
 
 async function pickDirectory() {
@@ -213,7 +213,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 560,
     backgroundColor: '#0a0c10',
-    title: 'CodeViz',
+    title: 'Agent Monitor',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -248,7 +248,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  ipcMain.handle('codeviz:pickDirectory', pickDirectory);
+  ipcMain.handle('agentmon:pickDirectory', pickDirectory);
 
   try {
     const started = await startBackend();
@@ -256,7 +256,7 @@ app.whenReady().then(async () => {
     ready = { port: started.port, token: started.token, url: started.url };
   } catch (err) {
     dialog.showErrorBox(
-      'CodeViz — backend failed to start',
+      'Agent Monitor — backend failed to start',
       `${err.message}\n\n` +
         `Tried: ${pythonCandidates().join(', ')}\n\n` +
         `Install the dependencies first:\n  pip install -e .`

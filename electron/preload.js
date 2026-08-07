@@ -10,13 +10,13 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('codeviz', {
+contextBridge.exposeInMainWorld('agentMonitor', {
   /** Native OS directory picker. Resolves to an absolute path, or null. */
-  pickDirectory: () => ipcRenderer.invoke('codeviz:pickDirectory'),
+  pickDirectory: () => ipcRenderer.invoke('agentmon:pickDirectory'),
 
   /** Menu items and accelerators — 'open' | 'refresh' | 'fit' | 'settings'. */
   onCommand: (handler) => {
-    ipcRenderer.on('codeviz:command', (_event, command, payload) => handler(command, payload));
+    ipcRenderer.on('agentmon:command', (_event, command, payload) => handler(command, payload));
   },
 
   platform: process.platform,

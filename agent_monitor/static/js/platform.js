@@ -9,7 +9,7 @@ const params = new URLSearchParams(location.search);
 export const TOKEN = params.get('token') || '';
 
 /** True when the Electron preload bridge is present. */
-export const isElectron = typeof window.codeviz === 'object' && window.codeviz !== null;
+export const isElectron = typeof window.agentMonitor === 'object' && window.agentMonitor !== null;
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -23,7 +23,7 @@ async function request(path, { method = 'GET', body } = {}) {
   const res = await fetch(url, {
     method,
     headers: {
-      'x-codeviz-token': TOKEN,
+      'x-agent-monitor-token': TOKEN,
       ...(body ? { 'content-type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -69,8 +69,8 @@ export function wsUrl() {
  * directory browser, which the caller supplies as `inAppFallback`.
  */
 export async function pickDirectory(inAppFallback) {
-  if (isElectron && window.codeviz.pickDirectory) {
-    const chosen = await window.codeviz.pickDirectory();
+  if (isElectron && window.agentMonitor.pickDirectory) {
+    const chosen = await window.agentMonitor.pickDirectory();
     return chosen || null;
   }
   return inAppFallback ? inAppFallback() : null;
@@ -78,7 +78,7 @@ export async function pickDirectory(inAppFallback) {
 
 /** Electron menu → renderer notifications (no-ops in the browser). */
 export function onShellCommand(handler) {
-  if (isElectron && window.codeviz.onCommand) {
-    window.codeviz.onCommand(handler);
+  if (isElectron && window.agentMonitor.onCommand) {
+    window.agentMonitor.onCommand(handler);
   }
 }

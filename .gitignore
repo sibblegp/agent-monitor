@@ -14,8 +14,8 @@ dist/
 node_modules/
 electron/node_modules/
 
-# codeviz
-.codeviz-cache/
+# agent_monitor
+.agent-monitor-cache/
 
 # editors / os
 .DS_Store
