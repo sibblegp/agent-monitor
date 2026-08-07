@@ -1,10 +1,9 @@
 /**
  * Structure pane renderer: the living force graph of the codebase.
  *
- * Draw order matters — theme hulls sit behind everything, then containment
- * links, then an additive glow pass, then node cores, then labels and pulses on
- * top. Removed nodes are kept as dim crimson ghosts rather than dropped, so a
- * reviewer can still see what was deleted.
+ * Draw order matters — containment links, then an additive glow pass, then node
+ * cores, then labels and pulses on top. Removed nodes are kept as dim crimson
+ * ghosts rather than dropped, so a reviewer can still see what was deleted.
  */
 
 import {
@@ -23,7 +22,6 @@ import {
 } from './effects.js';
 import { HOT_MS } from '../state.js';
 
-const THEME_COLORS = ['#38bdf8', '#a06bff', '#3ddc84', '#f5a623', '#ff5fa2', '#7ee6ff'];
 
 export class StructureRenderer {
   constructor(scene, layout, store) {
@@ -45,7 +43,6 @@ export class StructureRenderer {
     this._labelCells = new Set();
     this._labelQueue = [];
 
-    this._drawThemes(ctx, now, highlight);
     this._drawLinks(ctx, view, highlight);
     this._drawNodes(ctx, now, view, highlight, spotlight);
     this._flushLabels(ctx);
@@ -99,53 +96,6 @@ export class StructureRenderer {
         size: item.size / scale > 22 ? item.size : item.size,
       });
     }
-  }
-
-  // ── AI change themes, drawn as soft hulls behind their members ──────
-
-  _drawThemes(ctx, now, highlight) {
-    const themes = this.store.ai?.themes;
-    if (!themes?.length) return;
-
-    themes.forEach((theme, index) => {
-      const points = [];
-      for (const id of theme.members || []) {
-        const entry = this.layout.get(id);
-        if (entry) points.push(entry);
-      }
-      if (points.length < 2) return;
-
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const p of points) {
-        minX = Math.min(minX, p.x - p.r);
-        minY = Math.min(minY, p.y - p.r);
-        maxX = Math.max(maxX, p.x + p.r);
-        maxY = Math.max(maxY, p.y + p.r);
-      }
-      const pad = 26;
-      const color = THEME_COLORS[index % THEME_COLORS.length];
-      const alpha = highlight ? 0.05 : 0.1;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2, 20);
-      ctx.fillStyle = rgba(color, alpha);
-      ctx.fill();
-      ctx.strokeStyle = rgba(color, alpha * 2.6);
-      ctx.lineWidth = 1;
-      ctx.setLineDash([5, 5]);
-      ctx.stroke();
-      ctx.restore();
-
-      drawLabel(ctx, (minX + maxX) / 2, minY - pad - 8, theme.name, {
-        color,
-        alpha: 0.85,
-        size: 10,
-      });
-    });
   }
 
   // ── containment links ──────────────────────────────────────────────

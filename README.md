@@ -157,7 +157,8 @@ call hops around each change (0 = changed only), recomputed as you drag it.
 
 Click a file to expand it into its symbols. Click any symbol to highlight it in
 **both** panes at once — the fastest way to answer "where does this live, and
-what does it call?".
+what does it call?". Hovering highlights without explaining: what a change *is*
+belongs in the Review notes tab, not in a box chasing the cursor.
 
 ---
 
@@ -167,7 +168,7 @@ what does it call?".
 Anthropic API key in Settings. Once you do, Agent Monitor annotates each
 changeset with:
 
-- a one-line summary per changed symbol,
+- a one-line summary per changed symbol, listed in the **Review notes** tab,
 - a risk level and reason,
 - named themes over the changeset, drawn as labelled hulls behind their members,
 - a copyable review note for the whole diff, plus the **Review notes** tab: the

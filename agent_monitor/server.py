@@ -173,6 +173,9 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
         recents.record(target.abs_scope, target.to_dict()["name"])
         payload = engine.snapshot()
         await hub.broadcast("snapshot", payload)
+        # Same for a freshly opened repo: the watcher only fires on the *next*
+        # edit, so its existing changes would sit undescribed until then.
+        engine.request_ai()
         return {"ok": True, "meta": payload["meta"]}
 
     @app.post("/api/mode")
@@ -186,6 +189,10 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         payload = engine.snapshot()
         await hub.broadcast("snapshot", payload)
+        # Nothing else will ask for annotations here: outside `live` the watcher
+        # is stopped, so a commit or branch used to render with no synopsis on
+        # any node and no way to get one.
+        engine.request_ai()
         return {"ok": True, "meta": payload["meta"]}
 
     @app.post("/api/refresh")

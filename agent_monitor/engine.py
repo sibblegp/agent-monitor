@@ -159,8 +159,16 @@ class Engine:
         # Whole-file units need a fingerprint too, or an unparsed file would be
         # re-described on every rescan (no hash) or never again (stale hash).
         # Only changed files are hashed, so this stays cheap.
+        #
+        # Read the file from the side being *shown*, not the worktree: viewing a
+        # commit, the worktree holds some later version, and fingerprinting that
+        # would key the cache to content nobody is looking at.
         for change in self.changeset.files:
-            raw = gitutil.read_worktree(self.target.root, change.path) if self.target else None
+            raw = (
+                gitutil.read_side(self.target.root, change.new_ref, change.path)
+                if self.target
+                else None
+            )
             if raw is None:
                 out[file_id(change.path)] = f"gone:{change.status}"
             else:
@@ -177,9 +185,11 @@ class Engine:
         if not self.ai.settings.ai_enabled:
             return
 
+        live = self.mode == "live"
+
         # A commit is a chapter break: HEAD moved, so the diff everything is
         # measured against moved with it.
-        if self.narrator is not None and self.target.is_git:
+        if live and self.narrator is not None and self.target.is_git:
             head, subject = gitutil.head_info(self.target.root)
             if head and self._head and head != self._head:
                 self.narrator.note_commit(head, subject)
@@ -191,10 +201,15 @@ class Engine:
         hashes = self._symbol_hashes()
         args = (self.target, self.changeset, langs, sorted(self.parsed), self._read_side, hashes)
         self.ai.annotate_async(*args)
-        if self.narrator is not None:
+        if self.narrator is not None and live:
             # Separate call on a coarser cadence: the transcript narrates the
             # delta since its last entry, which is a different job from
             # re-describing the whole changeset.
+            #
+            # Only while live: the transcript is a play-by-play of work
+            # happening now. Browsing a commit is reading history, and feeding
+            # it through the narrator would report a year-old commit as though
+            # the agent had just written it.
             self.narrator.observe(*args)
 
     def apply_ai(self, result: dict[str, Any]) -> None:
@@ -205,7 +220,12 @@ class Engine:
         nodes meant every annotation vanished the next time anything changed,
         so a synopsis would appear and then silently disappear.
         """
-        self._ai = result
+        # Batches now report in as they land, so most of these are partial:
+        # summaries only, no themes or review note yet. Keeping the last full
+        # payload means the themes and review note already on screen survive
+        # instead of blinking out every time a batch arrives.
+        if not result.get("partial"):
+            self._ai = result
 
         for item in result.get("summaries", []):
             node_id = item.get("id")
@@ -505,13 +525,15 @@ class Engine:
     def review(self, against: str | None = None) -> dict[str, Any]:
         """Everything the AI has said about a comparison, grouped by file.
 
-        `against` names a branch to compare this one with; without it the
-        subject is the uncommitted work in the tree.
+        `against` names a branch to compare this one with. Without it the
+        subject is whatever the graph panes are showing — the uncommitted work
+        while live, or the selected commit or branch. Reviewing the working tree
+        while looking at a year-old commit would answer a question nobody asked.
         """
         if self.target is None:
             return {"error": "no repository open"}
 
-        mode, ref = ("against", against) if against else ("live", None)
+        mode, ref = ("against", against) if against else (self.mode, self.ref)
         try:
             changeset = self.build_changeset(mode, ref)
         except gitutil.GitError as exc:
@@ -576,6 +598,8 @@ class Engine:
         groups = sorted(by_path.values(), key=lambda g: g["path"])
         return {
             "against": against,
+            "mode": mode,
+            "ref": ref,
             "pending": pending,
             "base": changeset.base,
             "branch": self.target.branch,
@@ -597,9 +621,14 @@ class Engine:
         import hashlib  # noqa: PLC0415
 
         out: dict[str, str] = {}
+        refs = {c.path: c.new_ref for c in changeset.files}
         for unit in changeset.units():
             if unit.kind == "file":
-                raw = gitutil.read_side(self.target.root, None, unit.path) if self.target else None
+                raw = (
+                    gitutil.read_side(self.target.root, refs.get(unit.path), unit.path)
+                    if self.target
+                    else None
+                )
                 out[unit.node_id] = (
                     f"gone:{unit.status}" if raw is None
                     else hashlib.sha1(raw).hexdigest()[:16]

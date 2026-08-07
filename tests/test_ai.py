@@ -677,3 +677,114 @@ def test_a_malformed_batch_does_not_lose_the_whole_review(tmp_path: Path):
     assert [s["text"] for s in result["summaries"]] == ["fine"]
     assert [t["name"] for t in result["themes"]] == ["real"]
     engine.close()
+
+
+# ── browsing history, not just live work ──────────────────────────────
+
+
+def _commit_sha(root: Path, rev: str = "HEAD") -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", rev],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def test_a_commit_gets_annotated(tmp_path: Path):
+    """Regression: nothing asked for annotations outside `live`.
+
+    The watcher is stopped for a commit or branch diff, and it was the only
+    thing that ever called `request_ai`, so every node rendered with no synopsis
+    and no way to obtain one.
+    """
+    engine, _narrator, stub, _settings = _harness(tmp_path)
+    root = Path(engine.target.root)
+
+    (root / "app.py").write_text("def alpha():\n    return 42\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "change alpha"], check=True, capture_output=True)
+    sha = _commit_sha(root)
+
+    engine.set_mode("commit", sha)
+    engine.request_ai()
+    for _ in range(80):
+        if not engine.ai._inflight:
+            break
+        time.sleep(0.05)
+
+    annotate_calls = [c for c in stub.calls if c["tool_choice"]["name"] == "annotate_changeset"]
+    assert annotate_calls, "a commit was never sent for annotation"
+    prompt = annotate_calls[-1]["messages"][0]["content"]
+    assert "alpha" in prompt
+    engine.close()
+
+
+def test_history_is_not_narrated_as_live_work(tmp_path: Path):
+    """The transcript is a play-by-play of work happening now.
+
+    Narrating a commit you happen to be reading would report old work as though
+    the agent had just done it.
+    """
+    engine, _narrator, stub, _settings = _harness(tmp_path)
+    root = Path(engine.target.root)
+
+    (root / "app.py").write_text("def alpha():\n    return 42\n")
+    subprocess.run(["git", "-C", str(root), "commit", "-qam", "change alpha"], check=True, capture_output=True)
+
+    engine.set_mode("commit", _commit_sha(root))
+    engine.request_ai()
+    time.sleep(0.4)
+    assert not stub.narrations(), "browsing a commit produced a live narration entry"
+    engine.close()
+
+
+def test_review_follows_the_commit_being_viewed(tmp_path: Path):
+    """Review notes must describe what's on screen, not the working tree."""
+    engine, _narrator, _stub, _settings = _harness(tmp_path)
+    root = Path(engine.target.root)
+
+    (root / "committed.py").write_text("def in_the_commit():\n    return 1\n")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "add file"], check=True, capture_output=True)
+    sha = _commit_sha(root)
+
+    # Uncommitted work that must NOT appear in the commit's review.
+    (root / "dirty.py").write_text("def only_in_worktree():\n    return 2\n")
+
+    engine.set_mode("commit", sha)
+    review = engine.review()
+
+    assert review["mode"] == "commit"
+    assert review["ref"] == sha
+    paths = {g["path"] for g in review["groups"]}
+    assert "committed.py" in paths, paths
+    assert "dirty.py" not in paths, "the working tree leaked into a commit review"
+    engine.close()
+
+
+def test_a_reset_disowns_work_already_in_flight(tmp_path: Path):
+    """Switching subject mid-call must not let the old answer land on the new one.
+
+    A call takes tens of seconds. Switching to a commit while the working
+    tree's annotation was still out gave the commit that annotation's themes.
+    """
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    annotator = AiAnnotator(settings)
+
+    resetter = threading.Event()
+
+    class _SlowClient(_StubClient):
+        def create(self, **kwargs):
+            # Stand in for the user switching modes while the call is out.
+            annotator.reset()
+            resetter.set()
+            return super().create(**kwargs)
+
+    annotator._client = lambda: _SlowClient()
+
+    (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 5\n")
+    engine.rescan()
+
+    result = _annotate(engine, annotator)
+    assert resetter.is_set(), "the stub never ran"
+    assert result is None, "a stale annotation was returned after a reset"
+    assert annotator._last_themes == [], "stale themes survived the reset"
+    engine.close()

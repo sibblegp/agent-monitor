@@ -8,7 +8,7 @@
  */
 
 import { api } from '../platform.js';
-import { store } from '../state.js';
+import { CHANGED, store } from '../state.js';
 
 const el = {
   panel: document.getElementById('review-panel'),
@@ -27,6 +27,7 @@ const STATUS_COLOR = {
 
 let loading = 0; // ticket of the newest in-flight load
 let lastKey = null; // comparison the current notes describe
+let lastSource = null; // mode|ref the graph panes were showing
 
 function text(tag, cls, value) {
   const node = document.createElement(tag);
@@ -99,15 +100,12 @@ function render(data) {
     return;
   }
   if (!data.groups?.length) {
-    el.body.appendChild(
-      text(
-        'div',
-        'review-empty',
-        data.against
-          ? `Nothing differs from ${data.against}.`
-          : 'No uncommitted changes. Pick a branch above to review this one against it.'
-      )
-    );
+    const empty = data.against
+      ? `Nothing differs from ${data.against}.`
+      : data.mode === 'live'
+        ? 'No uncommitted changes. Pick a branch above to review this one against it.'
+        : 'This comparison contains no changes.';
+    el.body.appendChild(text('div', 'review-empty', empty));
     return;
   }
 
@@ -141,12 +139,106 @@ function render(data) {
       )
     );
   }
+  if (data.describing) {
+    el.body.appendChild(
+      text('div', 'review-pending', `describing ${data.describing} more…`)
+    );
+  }
 
   for (const group of data.groups) el.body.appendChild(renderGroup(group));
 }
 
+/**
+ * Build the live view's notes from what the live pipeline has already said.
+ *
+ * While live, every changed symbol is being annotated anyway to fill the hover
+ * tooltips — so the notes are a re-presentation of data already in the store,
+ * not a second analysis. Nothing is requested, nothing is paid for twice, and
+ * entries appear exactly as the agent's work is described.
+ */
+function compileLiveReview() {
+  const changes = store.changes;
+  if (!changes) return { mode: 'live', groups: [], counts: {} };
+
+  const groups = new Map();
+  for (const file of changes.files || []) {
+    groups.set(file.path, {
+      path: file.path,
+      status: file.status,
+      added: file.added || 0,
+      removed: file.removed || 0,
+      items: [],
+    });
+  }
+
+  const covered = new Set();
+  for (const symbol of changes.symbols || []) {
+    if (!CHANGED.has(symbol.status)) continue;
+    const group = groups.get(symbol.path);
+    if (!group) continue;
+    covered.add(symbol.path);
+    const node = store.nodes.get(symbol.id);
+    group.items.push({
+      id: symbol.id,
+      name: symbol.qualname,
+      kind: symbol.kind,
+      status: symbol.status,
+      text: node?.summary || null,
+      risk: node?.risk || null,
+      reason: node?.risk_reason || null,
+    });
+  }
+
+  // A file nothing was parsed out of carries its own note, as it does server-side.
+  for (const [path, group] of groups) {
+    if (covered.has(path)) continue;
+    const node = store.nodes.get(`file:${path}`);
+    group.text = node?.summary || null;
+    group.risk = node?.risk || null;
+    group.reason = node?.risk_reason || null;
+  }
+
+  const list = [...groups.values()].sort((a, b) => a.path.localeCompare(b.path));
+  const described = list.reduce(
+    (n, g) => n + (g.text ? 1 : 0) + g.items.filter((i) => i.text).length,
+    0
+  );
+  const total = list.reduce((n, g) => n + (g.items.length || 1), 0);
+
+  return {
+    mode: 'live',
+    against: null,
+    note: store.ai?.review_note || '',
+    themes: store.ai?.themes || [],
+    error: null,
+    // Not a cap — just work still in flight, which fills in on its own.
+    describing: Math.max(0, total - described),
+    counts: {
+      files: list.length,
+      symbols: list.reduce((n, g) => n + g.items.length, 0),
+      added: list.reduce((n, g) => n + g.added, 0),
+      removed: list.reduce((n, g) => n + g.removed, 0),
+      described,
+    },
+    groups: list,
+  };
+}
+
+/** True when the panel is showing the live view rather than a fixed comparison. */
+function showingLive() {
+  return !el.base.value && store.meta?.mode === 'live';
+}
+
 export async function loadReview({ force = false } = {}) {
   const against = el.base.value || '';
+
+  // Live notes are free to build and always current — no fetch, no cache check.
+  if (showingLive()) {
+    lastKey = against;
+    render(compileLiveReview());
+    return;
+  }
+
   if (!force && lastKey === against && el.body.childElementCount) return;
 
   // A cold review takes tens of seconds. Refusing to start a second one while
@@ -167,13 +259,34 @@ export async function loadReview({ force = false } = {}) {
   }
 }
 
+/**
+ * Label for the default option, which reviews whatever the graph panes show.
+ *
+ * Reviewing the working tree while you're looking at a commit would answer a
+ * question you didn't ask, so the subject follows the view — and the label has
+ * to say which it is.
+ */
+function currentViewLabel() {
+  const meta = store.meta;
+  const ref = meta?.ref;
+  if (meta?.mode === 'commit') return `This commit${ref ? ` (${ref.slice(0, 7)})` : ''}`;
+  if (meta?.mode === 'branch') return `Branch ${ref || ''}`.trim();
+  if (meta?.mode === 'range') return `Range ${ref || ''}`.trim();
+  return 'Uncommitted work (vs HEAD)';
+}
+
+function relabelCurrent() {
+  const option = el.base.options[0];
+  if (option && option.value === '') option.text = currentViewLabel();
+}
+
 /** Fill the comparison picker. Called whenever a repo opens. */
 export async function refreshBranches() {
   const current = el.base.value;
   try {
     const { branches = [], current: head } = await api.branches();
     el.base.replaceChildren();
-    el.base.appendChild(new Option('Uncommitted work (vs HEAD)', ''));
+    el.base.appendChild(new Option(currentViewLabel(), ''));
     for (const name of branches) {
       // Comparing a branch with itself is always empty; don't offer it.
       if (name === head) continue;
@@ -188,9 +301,28 @@ export async function refreshBranches() {
 export function initReview() {
   el.base.addEventListener('change', () => loadReview({ force: true }));
   el.refresh.addEventListener('click', () => loadReview({ force: true }));
+
+  // Live notes are a view onto the store, so they follow it. Annotations
+  // arrive in batches as the agent works; re-rendering on each is what makes
+  // entries appear as the work is described rather than in one lump later.
+  store.on((kind) => {
+    if (kind !== 'ai' && kind !== 'snapshot') return;
+    if (el.panel.hidden || !showingLive()) return;
+    render(compileLiveReview());
+  });
 }
 
 /** Notes describe a diff, so they go stale when the diff moves. */
 export function markReviewStale() {
   lastKey = null;
+  relabelCurrent();
+
+  const source = `${store.meta?.mode}|${store.meta?.ref || ''}`;
+  const moved = lastSource !== null && lastSource !== source;
+  lastSource = source;
+
+  // Switching to a commit is a deliberate act, so a visible panel should follow
+  // it. Live edits arrive here too and must *not* each trigger an AI call —
+  // hence only on an actual change of subject.
+  if (moved && !el.panel.hidden && !el.base.value) loadReview({ force: true });
 }

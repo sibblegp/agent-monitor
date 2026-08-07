@@ -18,7 +18,7 @@ import difflib
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from ..model import CHANGED_STATUSES, ChangeSet, RepoTarget
@@ -154,6 +154,8 @@ class AiAnnotator:
         self._inflight = False
         self._pending_args = None
         self._disabled_reason: str | None = None
+        #: Bumped by `reset`; results from an older generation are discarded.
+        self._generation = 0
 
     # ------------------------------------------------------------------
 
@@ -245,6 +247,8 @@ class AiAnnotator:
         if not changed:
             return None
 
+        generation = self._generation
+
         if self.usage["requests"] >= MAX_REQUESTS_PER_SESSION:
             raise AiUnavailable(
                 f"per-session request cap ({MAX_REQUESTS_PER_SESSION}) reached"
@@ -266,6 +270,8 @@ class AiAnnotator:
                 pending.append((change, key))
 
         if not pending:
+            if generation != self._generation:
+                return None
             # Everything was already analyzed; still return so themes/notes show.
             return {
                 "summaries": cached_summaries,
@@ -317,21 +323,11 @@ class AiAnnotator:
             entries = [entry_for(change, ref) for ref, change in refs.items()]
             plan.append((batch, refs, entries, truncated if start == 0 else 0))
 
-        # The batches don't depend on each other, and each is a multi-second
-        # round trip. Run them together: reviewing a whole branch went from
-        # minutes of sequential calls to roughly one call's wait.
-        if len(plan) > 1:
-            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_BATCHES) as pool:
-                parts = list(
-                    pool.map(
-                        lambda job: self._request(target, langs, files, job[2], job[3]),
-                        plan,
-                    )
-                )
-        else:
-            parts = [self._request(target, langs, files, job[2], job[3]) for job in plan]
-
-        for (batch, refs, _entries, _trunc), part in zip(plan, parts):
+        def absorb(job, part) -> list[dict[str, Any]]:
+            """Fold one batch's answer in. Returns the summaries it contributed."""
+            nonlocal note
+            batch, refs, _entries, _trunc = job
+            fresh: list[dict[str, Any]] = []
             resolve = _resolver(refs)
 
             # Everything below is model output: shaped by a tool schema, but not
@@ -341,7 +337,8 @@ class AiAnnotator:
             for item in _dicts(part.get("summaries")):
                 node_id = resolve(item.get("id"))
                 if node_id:
-                    summaries.append({"id": node_id, "text": _scrub_refs(item.get("text"))})
+                    fresh.append({"id": node_id, "text": _scrub_refs(item.get("text"))})
+            summaries.extend(fresh)
             for item in _dicts(part.get("risk")):
                 node_id = resolve(item.get("id"))
                 if node_id:
@@ -375,6 +372,44 @@ class AiAnnotator:
                     if change.node_id in risk_by_id
                     else None,
                 }
+            return fresh
+
+        # The batches don't depend on each other, and each is a multi-second
+        # round trip. Run them together: reviewing a whole branch went from
+        # minutes of sequential calls to roughly one call's wait.
+        #
+        # Each is also folded in the moment it lands, and pushed to the UI, so
+        # synopses start appearing after the first batch instead of the whole
+        # changeset staying blank until the slowest one returns.
+        if len(plan) > 1:
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_BATCHES) as pool:
+                futures = {
+                    pool.submit(self._request, target, langs, files, job[2], job[3]): job
+                    for job in plan
+                }
+                for future in as_completed(futures):
+                    if generation != self._generation:
+                        break
+                    fresh = absorb(futures[future], future.result())
+                    if fresh and self.on_result is not None:
+                        self.on_result(
+                            {
+                                "summaries": fresh,
+                                "risk": list(risk),
+                                "themes": [],
+                                "review_note": "",
+                                "usage": self.usage,
+                                "partial": True,
+                            }
+                        )
+        else:
+            for job in plan:
+                absorb(job, self._request(target, langs, files, job[2], job[3]))
+
+        if generation != self._generation:
+            # The subject changed while these calls were out. Their answers
+            # describe code nobody is looking at any more.
+            return None
 
         result: dict[str, Any] = {
             "summaries": cached_summaries + summaries,
@@ -402,7 +437,15 @@ class AiAnnotator:
 
         Called when the subject changes wholesale — a different repo, a
         different mode — so themes and notes from the old one don't bleed in.
+
+        Bumping the generation also disowns work already in flight. A call takes
+        tens of seconds, so switching to a commit mid-flight let the *working
+        tree's* annotations land on it moments later: themes describing
+        uncommitted work, attached to a commit from last week.
         """
+        with self._lock:
+            self._generation += 1
+            self._pending_args = None
         self._cache.clear()
         self._misses.clear()
         self._last_themes = []

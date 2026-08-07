@@ -286,6 +286,11 @@ function updateChrome() {
   el.repoButton.title = repo ? `${repo.root}${repo.scope ? `/${repo.scope}` : ''}` : 'Open a repository (Ctrl+O)';
 
   if (meta) {
+    // The backend keeps the mode across a page reload, so read it back rather
+    // than assuming Live — the top bar claimed "Live" while the panes were
+    // showing a commit.
+    selectSeg(el.sourceSeg, 'mode', meta.mode || 'live');
+
     const changedFiles = meta.changed_files ?? 0;
     const changedSymbols = meta.changed_symbols ?? 0;
     el.stats.innerHTML =
@@ -323,29 +328,6 @@ function updateChrome() {
     updateAiStatus(meta.ai);
   }
   if (meta?.warnings?.length) banner(meta.warnings[0], 'warn');
-}
-
-/** Review-ready summary of the whole changeset, with copy-to-clipboard. */
-function showReviewNote(text) {
-  let box = document.getElementById('review-note');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'review-note';
-    box.className = 'review-note';
-    document.getElementById('app').append(box);
-  }
-  box.innerHTML =
-    '<div class="rn-head"><span>Review note</span>' +
-    '<button class="icon-btn" data-copy title="Copy">\u29c9</button>' +
-    '<button class="icon-btn" data-dismiss title="Dismiss">\u2715</button></div>' +
-    '<p></p>';
-  box.querySelector('p').textContent = text;
-  box.querySelector('[data-copy]').addEventListener('click', () => {
-    navigator.clipboard?.writeText(text);
-    banner('Review note copied', 'info', 1600);
-  });
-  box.querySelector('[data-dismiss]').addEventListener('click', () => box.remove());
-  box.hidden = false;
 }
 
 let bannerTimer = null;
@@ -764,7 +746,6 @@ const live = new Live(
       renderFeed(store);
       updateAiStatus(message.meta_ai);
       dirty = true;
-      if (message.review_note) showReviewNote(message.review_note);
     } else if (message.type === 'narration') {
       addNarrativeEntry(message.entry);
     } else if (message.type === 'narration_delta') {

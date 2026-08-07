@@ -165,7 +165,9 @@ export class Store {
 
   /** Merge AI annotations onto existing nodes without touching graph shape. */
   applyAi(payload) {
-    this.ai = payload;
+    // Partial payloads carry a batch of summaries and nothing else; adopting
+    // one wholesale would clear the themes and review note already shown.
+    if (!payload.partial) this.ai = payload;
     for (const item of payload.summaries || []) {
       const node = this.nodes.get(item.id);
       if (node) node.summary = item.text;

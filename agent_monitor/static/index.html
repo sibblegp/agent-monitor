@@ -107,6 +107,7 @@
   </footer>
 
   <!-- ───────────────────────── overlays ───────────────────────── -->
+
   <div id="tooltip" class="tooltip" hidden></div>
 
   <div id="banner" class="banner" hidden></div>
@@ -167,8 +168,9 @@
           <h4>AI insights <span class="tag">optional</span></h4>
           <p class="muted">
             Sends the diff of changed symbols in the current scope to the Anthropic API
-            to generate one-line summaries, risk flags, change themes, and a review note.
-            Off by default. The visualization works fully without it.
+            to generate one-line summaries, risk flags, change themes, and a review note,
+            shown in the Narrative and Review notes tabs. On by default, but inert
+            until a key is set. The visualization works fully without it.
           </p>
           <label class="field">
             <span>API key</span>
