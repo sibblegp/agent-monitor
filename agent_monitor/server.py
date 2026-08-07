@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,20 @@ from .ai import AiAnnotator, Narrator
 from .config import Settings
 from .engine import Engine
 
-STATIC_DIR = Path(__file__).parent / "static"
+def _static_dir() -> Path:
+    """Where the frontend lives, source checkout or frozen bundle alike.
+
+    PyInstaller unpacks bundled data to `sys._MEIPASS` and leaves `__file__`
+    pointing inside the archive, so the packaged app would serve 404s for every
+    asset without this.
+    """
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        return Path(bundled) / "agent_monitor" / "static"
+    return Path(__file__).parent / "static"
+
+
+STATIC_DIR = _static_dir()
 
 
 class Hub:

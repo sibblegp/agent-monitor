@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for a notarized build.
+
+  The hardened runtime blocks a signed app from doing things Electron and a
+  frozen Python both need. Each of these is required, not defensive:
+
+  - allow-jit / allow-unsigned-executable-memory: V8 compiles JavaScript at
+    runtime. Without these the renderer crashes on launch.
+  - allow-dyld-environment-variables / disable-library-validation: the frozen
+    backend loads its own bundled shared libraries, which are signed with our
+    certificate rather than Apple's.
+  - inherit: applies the same rules to the backend process the app spawns.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.inherit</key>
+  <true/>
+</dict>
+</plist>

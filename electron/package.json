@@ -5,9 +5,48 @@
   "description": "Native window for Agent Monitor — spawns the Python backend and points a BrowserWindow at it",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --mac",
+    "dist:dir": "electron-builder --mac --dir"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "net.sibble.agent-monitor",
+    "productName": "Agent Monitor",
+    "copyright": "Copyright © George Sibble",
+    "directories": {
+      "output": "../dist-app",
+      "buildResources": "build"
+    },
+    "files": ["main.js", "preload.js", "package.json"],
+    "extraResources": [
+      {
+        "from": "../dist/agent-monitor-backend",
+        "to": "backend"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "../packaging/entitlements.mac.plist",
+      "entitlementsInherit": "../packaging/entitlements.mac.plist",
+      "extendInfo": {
+        "NSHumanReadableCopyright": "Copyright © George Sibble"
+      }
+    },
+    "dmg": {
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
   }
 }

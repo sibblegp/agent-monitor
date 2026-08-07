@@ -59,6 +59,33 @@ python -m agent_monitor ~/code/my-project
 Either way the app starts on an **Open** dialog if you don't name a path.
 `Ctrl+O` reopens it, and recent repositories are remembered.
 
+## Build a standalone macOS app
+
+```bash
+./packaging/build-macos.sh
+```
+
+Produces `dist-app/Agent Monitor-0.1.0-arm64.dmg` — no Python, no Node, nothing
+to install. Must be run **on macOS**: PyInstaller freezes the interpreter it is
+running under, so it cannot cross-compile, and an Apple Silicon Mac yields an
+arm64-only app.
+
+How it fits together: PyInstaller freezes the backend into a self-contained
+`agent-monitor-backend`, electron-builder ships that inside the bundle as a
+resource, and the shell spawns it instead of looking for a system Python. In a
+source checkout the same shell falls back to `env_cv/bin/python`, so `npm start`
+still works unchanged.
+
+`git` remains a runtime requirement — it cannot be bundled, and the app checks
+for it at launch and says so rather than opening a window that analyses nothing.
+
+**Signing.** An unsigned build runs fine but Gatekeeper blocks the first launch;
+right-click → Open, or `xattr -dr com.apple.quarantine "/Applications/Agent
+Monitor.app"`. To sign and notarize properly you need an Apple Developer
+account: export `CSC_NAME`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
+`APPLE_TEAM_ID`, then run `./packaging/build-macos.sh --signed`. The hardened
+runtime entitlements this needs are in `packaging/entitlements.mac.plist`.
+
 ## Try it without an agent
 
 ```bash
@@ -214,6 +241,7 @@ agent_monitor/
   ai/                   optional Anthropic annotations
   static/               self-contained frontend — ES modules + Canvas, no build
 electron/               native shell: spawn backend, window, menu, dialog
+packaging/              PyInstaller spec + macOS app build
 tools/simulate_agent.py scripted demo edits
 ```
 

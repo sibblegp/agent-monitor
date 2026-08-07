@@ -10,7 +10,7 @@
 'use strict';
 
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -41,6 +41,36 @@ function repoArg() {
   return null;
 }
 
+/**
+ * The frozen backend shipped inside the app bundle, if there is one.
+ *
+ * A packaged app cannot assume a Python exists on the machine, let alone one
+ * with the dependencies installed, so the release carries its own. In a source
+ * checkout this returns null and the interpreter search below takes over.
+ *
+ * Keyed on the file actually being there rather than on `app.isPackaged`: some
+ * distributions' electron wrappers export ELECTRON_FORCE_IS_PACKAGED=true, so
+ * that flag reports "packaged" for an ordinary `npm start` and the backend gets
+ * launched from the wrong directory.
+ */
+function bundledBackend() {
+  const exe = process.platform === 'win32' ? 'agent-monitor-backend.exe' : 'agent-monitor-backend';
+  const candidate = path.join(process.resourcesPath ?? '', 'backend', exe);
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * `git` is not bundled and never can be — it's a runtime dependency.
+ *
+ * macOS ships a stub at /usr/bin/git that prompts to install the Command Line
+ * Tools, so a fresh Mac will fail here rather than on the first diff. Better to
+ * say so up front than to open a window that silently analyses nothing.
+ */
+function gitIsAvailable() {
+  const probe = spawnSync('git', ['--version'], { encoding: 'utf8' });
+  return probe.status === 0;
+}
+
 /** Prefer the project's virtualenv, then a `agent_monitor` on PATH, then bare python. */
 function pythonCandidates() {
   const isWin = process.platform === 'win32';
@@ -55,20 +85,26 @@ function pythonCandidates() {
 
 function startBackend() {
   return new Promise((resolve, reject) => {
-    const [exe, ...fallbacks] = pythonCandidates();
-    const args = ['-m', 'agent_monitor', '--port', '0', '--no-browser'];
-
     // Open whatever the user passed on the command line, if anything.
     //
     // Read from an explicit --repo flag rather than a positional argument.
     // Electron's argv also contains the app directory, and a bare positional
     // was picking *that* up as the repo: launching from the project root
     // silently opened `electron/` and watched only that subtree.
+    const flags = ['--port', '0', '--no-browser'];
     const target = repoArg();
-    if (target) args.push(target);
+    if (target) flags.push(target);
+
+    const bundled = bundledBackend();
+    const exe = bundled ?? pythonCandidates()[0];
+    const fallbacks = bundled ? [] : pythonCandidates().slice(1);
+    const args = bundled ? flags : ['-m', 'agent_monitor', ...flags];
 
     const child = spawn(exe, args, {
-      cwd: ROOT,
+      // From a source checkout the project root has to be the working directory:
+      // `agent_monitor` is importable from there without being pip-installed.
+      // The frozen binary carries its own modules and just runs where it lives.
+      cwd: bundled ? path.dirname(bundled) : ROOT,
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     });
 
@@ -269,6 +305,18 @@ function createWindow() {
 
 app.whenReady().then(async () => {
   ipcMain.handle('agentmon:pickDirectory', pickDirectory);
+
+  if (!gitIsAvailable()) {
+    dialog.showErrorBox(
+      'Agent Monitor needs git',
+      'Agent Monitor reads your history with the `git` command, which is not ' +
+        'installed or not on PATH.\n\n' +
+        'On macOS, running `git --version` in Terminal will offer to install ' +
+        'the Xcode Command Line Tools.'
+    );
+    app.quit();
+    return;
+  }
 
   try {
     const started = await startBackend();
