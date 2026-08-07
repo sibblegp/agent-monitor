@@ -1,5 +1,7 @@
 # Agent Monitor
 
+[![Agent Monitor reviewing one of its own commits — click for full resolution](docs/screenshot.png)](docs/screenshot.png)
+
 Watch an AI agent reshape your codebase, live.
 
 Reviewing what an agent did is hard: a dozen files change per turn, and a
