@@ -156,7 +156,8 @@ function frame(now) {
     dirty = true;
   }
 
-  const animating = simMoving || flowMoving || camMoving || store.hasLiveActivity;
+  const animating =
+    simMoving || flowMoving || camMoving || store.hasLiveActivity || store.flowIsAnimating;
 
   if (!animating && !dirty && !needsFit && !settleFit) {
     requestAnimationFrame(frame);

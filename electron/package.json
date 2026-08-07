@@ -1,0 +1,13 @@
+{
+  "name": "codeviz-shell",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native window for CodeViz — spawns the Python backend and points a BrowserWindow at it",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.0.0"
+  }
+}

@@ -77,10 +77,18 @@ export class FlowRenderer {
       const dstNode = store.nodes.get(edge.dst);
       const touched = isChanged(srcNode) || isChanged(dstNode);
       const dimmed = highlight && !(highlight.has(edge.src) && highlight.has(edge.dst));
-      // Particles ride only edges attached to a change from the *latest*
-      // update. Drifting dots on every edge is ambient noise that competes
-      // with the one thing you're meant to look at.
-      const live = store.isRecent(edge.src, now) || store.isRecent(edge.dst, now);
+
+      // In the "all" view, particles ride only the *latest* change — drifting
+      // dots on every edge is ambient noise competing with the thing you're
+      // meant to look at.
+      //
+      // In the "changes" view the changed subgraph is the entire subject, so
+      // the flow keeps running until the next change replaces it. Nothing else
+      // is on screen for it to compete with.
+      const live =
+        store.filter === 'changes'
+          ? touched
+          : store.isRecent(edge.src, now) || store.isRecent(edge.dst, now);
 
       const color = touched
         ? COLORS[isChanged(srcNode) ? srcNode.status : dstNode.status] || COLORS.modified

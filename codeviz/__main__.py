@@ -77,6 +77,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"codeviz: cannot bind {args.host}:{args.port}: {exc}", file=sys.stderr)
         return 2
     port = sock.getsockname()[1]
+
+    # Start listening *before* announcing readiness. Binding alone leaves a
+    # window where the port is known but connections are refused, and the
+    # Electron shell connects the instant it reads the handshake. With the
+    # socket listening, early connections queue in the kernel backlog until
+    # uvicorn accepts them.
+    sock.listen(128)
+
     url = f"http://{args.host}:{port}/?token={token}"
 
     # The Electron shell parses exactly this line from stdout.

@@ -71,6 +71,21 @@ export class Store {
   }
 
   /**
+   * True while the flow pane has a continuously-animating subgraph.
+   *
+   * The render loop idles when nothing moves, so this keeps it awake for the
+   * "changes" view's persistent particle flow — otherwise the particles freeze
+   * mid-edge a few seconds after the change that spawned them.
+   */
+  get flowIsAnimating() {
+    if (this.filter !== 'changes') return false;
+    for (const node of this.nodes.values()) {
+      if (CHANGED.has(node.status)) return true;
+    }
+    return false;
+  }
+
+  /**
    * 1 → 0 over SPOTLIGHT_MS after a change lands. Everything that didn't just
    * change dims by this much, so the eye is pulled straight to the edit even if
    * it's a single small node in a busy graph.
