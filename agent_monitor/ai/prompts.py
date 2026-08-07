@@ -123,6 +123,9 @@ This is a play-by-play, not a summary. Rules:
   describe the mechanical change instead. Never invent a rationale.
 - Never speculate about work that hasn't appeared in a diff yet.
 - No preamble, no "it looks like the agent is". Just say what's happening.
+- Keep it SHORT. This is read in a narrow column beside the graph, not in a
+  report. Two sentences maximum, and one is usually better. Name the two or
+  three symbols that matter, not every symbol you were given.
 """
 
 NARRATE_TOOL = {
@@ -138,9 +141,10 @@ NARRATE_TOOL = {
             "detail": {
                 "type": "string",
                 "description": (
-                    "One or two sentences continuing the commentary. Concrete, "
-                    "names the symbols involved, and connects to the previous entry "
-                    "when there is a connection."
+                    "At most two sentences, ideally one. Concrete, names the two "
+                    "or three symbols that matter, and connects to the previous "
+                    "entry when there is a connection. This is read in a narrow "
+                    "column, so brevity matters more than completeness."
                 ),
             },
             "phase": {

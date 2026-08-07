@@ -96,8 +96,15 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
                 hub.broadcast("narration", {"entry": entry}), loop
             )
 
+        def narration_delta(payload: dict[str, Any]) -> None:
+            asyncio.run_coroutine_threadsafe(
+                hub.broadcast("narration_delta", payload), loop
+            )
+
         annotator = AiAnnotator(settings, on_result=ai_arrived)
-        narrator = Narrator(settings, annotator, on_entry=narration_arrived)
+        narrator = Narrator(
+            settings, annotator, on_entry=narration_arrived, on_delta=narration_delta
+        )
         engine.attach_ai(annotator, narrator)
         # A repo opened via the CLI starts watching only once the loop exists.
         engine._start_watcher()

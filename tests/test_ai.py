@@ -36,6 +36,43 @@ class _Response:
         self.usage = types.SimpleNamespace(input_tokens=500, output_tokens=40)
 
 
+class _Delta:
+    """One `input_json_delta` fragment of a streamed tool call."""
+
+    type = "content_block_delta"
+
+    def __init__(self, partial_json):
+        self.delta = types.SimpleNamespace(type="input_json_delta", partial_json=partial_json)
+
+
+class _Stream:
+    """Context manager mimicking `client.messages.stream(...)`.
+
+    Emits the tool-call JSON in small fragments so the partial-JSON reader and
+    the delta callbacks are genuinely exercised, not stubbed past.
+    """
+
+    def __init__(self, payload, response):
+        self._payload = payload
+        self._response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        import json as _json
+
+        text = _json.dumps(self._payload)
+        for i in range(0, len(text), 7):
+            yield _Delta(text[i : i + 7])
+
+    def get_final_message(self):
+        return self._response
+
+
 class _StubClient:
     """Records every request and answers with a valid forced-tool response."""
 
@@ -43,12 +80,21 @@ class _StubClient:
         self.calls = []
         self.messages = self
 
+    def _payload_for(self, tool):
+        if tool == "narrate_step":
+            return {"headline": "did a thing", "detail": "d.", "phase": "implementing"}
+        return {"summaries": [], "risk": [], "themes": [], "review_note": "note"}
+
     def create(self, **kwargs):
         self.calls.append(kwargs)
         tool = kwargs["tool_choice"]["name"]
-        if tool == "narrate_step":
-            return _Response(tool, {"headline": "did a thing", "detail": "d.", "phase": "implementing"})
-        return _Response(tool, {"summaries": [], "risk": [], "themes": [], "review_note": "note"})
+        return _Response(tool, self._payload_for(tool))
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        tool = kwargs["tool_choice"]["name"]
+        payload = self._payload_for(tool)
+        return _Stream(payload, _Response(tool, payload))
 
     def narrations(self):
         return [c for c in self.calls if c["tool_choice"]["name"] == "narrate_step"]
@@ -352,4 +398,27 @@ def test_requests_arriving_mid_flight_are_not_dropped(tmp_path: Path):
 
     sent = "\n".join(c["messages"][0]["content"] for c in annotate_calls)
     assert "second.py" in sent, "the symbol added mid-flight was never annotated"
+    engine.close()
+
+
+def test_narration_streams_progressively(tmp_path: Path):
+    """The pane should fill in as the model writes, not all at once at the end."""
+    engine, narrator, stub, _ = _harness(tmp_path)
+    deltas: list[dict] = []
+    narrator.on_delta = deltas.append
+
+    _observe(engine, narrator)
+    (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 42\n")
+    engine.rescan()
+    _observe(engine, narrator)
+
+    assert deltas, "no streaming callbacks fired"
+    assert deltas[0]["state"] == "start"
+
+    detail_states = [d.get("detail", "") for d in deltas if d["state"] == "delta"]
+    assert len(detail_states) > 1, "detail arrived in a single lump, not progressively"
+    # each update must extend the previous one, never rewrite it
+    for earlier, later in zip(detail_states, detail_states[1:]):
+        assert later.startswith(earlier), (earlier, later)
+    assert detail_states[-1] == narrator.entries[0]["detail"]
     engine.close()

@@ -20,9 +20,9 @@ import { hideTooltip, showTooltip } from './ui/inspector.js';
 import { initSettings, renderSettings, updateAiStatus } from './ui/settings.js';
 import {
   addEntry as addNarrativeEntry,
+  applyDelta as applyNarrativeDelta,
   initNarrative,
   renderNarrative,
-  setActive as setNarrativeActive,
   setEntries as setNarrativeEntries,
 } from './ui/narrative.js';
 
@@ -45,6 +45,8 @@ const el = {
   aiLabel: document.getElementById('ai-label'),
   banner: document.getElementById('banner'),
   splitter: document.getElementById('splitter'),
+  splitterNarrative: document.getElementById('splitter-narrative'),
+  paneNarrative: document.getElementById('pane-narrative'),
   panes: document.getElementById('panes'),
   paneStructure: document.getElementById('pane-structure'),
   paneFlow: document.getElementById('pane-flow'),
@@ -537,44 +539,45 @@ function closeRef(value) {
 
 el.refDialog.querySelector('[data-close]').addEventListener('click', () => closeRef(null));
 
-// ── footer tabs ───────────────────────────────────────────────────────
-
-function selectFeedTab(name) {
-  for (const tab of document.querySelectorAll('.feed-tab')) {
-    tab.classList.toggle('is-active', tab.dataset.tab === name);
-  }
-  for (const panel of document.querySelectorAll('[data-panel]')) {
-    panel.hidden = panel.dataset.panel !== name;
-  }
-  setNarrativeActive(name === 'narrative');
-  if (name === 'narrative') renderNarrative(store, currentSettings, currentAiStatus);
-}
-
-document.querySelector('.feed-tabs').addEventListener('click', (ev) => {
-  const tab = ev.target.closest('.feed-tab');
-  if (tab) selectFeedTab(tab.dataset.tab);
-});
-
 // ── splitter ──────────────────────────────────────────────────────────
 
-(function splitter() {
-  let dragging = false;
-  el.splitter.addEventListener('mousedown', (ev) => {
-    dragging = true;
-    el.splitter.classList.add('is-dragging');
+(function splitters() {
+  let active = null;
+
+  const start = (handle, pane, min, max) => (ev) => {
+    active = { handle, pane, min, max };
+    handle.classList.add('is-dragging');
     ev.preventDefault();
-  });
+  };
+
+  el.splitterNarrative.addEventListener(
+    'mousedown',
+    start(el.splitterNarrative, el.paneNarrative, 0.1, 0.45)
+  );
+  el.splitter.addEventListener('mousedown', start(el.splitter, el.paneStructure, 0.15, 0.8));
+
   window.addEventListener('mousemove', (ev) => {
-    if (!dragging) return;
+    if (!active) return;
     const rect = el.panes.getBoundingClientRect();
-    const ratio = Math.max(0.15, Math.min(0.85, (ev.clientX - rect.left) / rect.width));
-    el.paneStructure.style.flex = `0 0 ${ratio * 100}%`;
-    el.paneFlow.style.flex = `1 1 auto`;
+    if (active.pane === el.paneNarrative) {
+      const ratio = Math.max(active.min, Math.min(active.max, (ev.clientX - rect.left) / rect.width));
+      el.paneNarrative.style.flex = `0 0 ${ratio * 100}%`;
+    } else {
+      // Structure is measured from the narrative pane's right edge, not the
+      // window edge, so dragging one splitter doesn't fight the other.
+      const left = el.paneNarrative.getBoundingClientRect().right;
+      const available = rect.right - left;
+      const ratio = Math.max(active.min, Math.min(active.max, (ev.clientX - left) / available));
+      el.paneStructure.style.flex = `0 0 ${ratio * 100}%`;
+      el.paneFlow.style.flex = '1 1 auto';
+    }
     resizeScenes();
   });
+
   window.addEventListener('mouseup', () => {
-    dragging = false;
-    el.splitter.classList.remove('is-dragging');
+    if (!active) return;
+    active.handle.classList.remove('is-dragging');
+    active = null;
   });
 })();
 
@@ -751,9 +754,11 @@ const live = new Live(
       dirty = true;
       if (message.review_note) showReviewNote(message.review_note);
     } else if (message.type === 'narration') {
-      addNarrativeEntry(message.entry, store, currentSettings, currentAiStatus);
+      addNarrativeEntry(message.entry);
+    } else if (message.type === 'narration_delta') {
+      applyNarrativeDelta(message);
     } else if (message.type === 'narration_all') {
-      setNarrativeEntries(message.entries, store, currentSettings, currentAiStatus);
+      setNarrativeEntries(message.entries);
     } else if (message.type === 'status') {
       if (message.text) banner(message.text, message.level || 'info');
     } else if (message.type === 'idle') {
@@ -802,7 +807,8 @@ async function boot() {
     currentSettings = state.settings;
     currentAiStatus = state.meta?.ai || null;
     renderSettings(state.settings, state.meta?.ai);
-    setNarrativeEntries(state.narration || [], store, currentSettings, currentAiStatus);
+    renderNarrative(store, currentSettings, currentAiStatus);
+    setNarrativeEntries(state.narration || []);
     if (state.has_repo) {
       const payload = await api.snapshot();
       applySnapshot(payload, { refit: true });

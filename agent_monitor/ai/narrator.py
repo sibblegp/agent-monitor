@@ -41,11 +41,19 @@ MAX_TRANSCRIPT = 300
 class Narrator:
     """Maintains an append-only commentary on the changes flowing past."""
 
-    def __init__(self, settings, annotator, on_entry: Callable[[dict[str, Any]], None] | None = None):
+    def __init__(
+        self,
+        settings,
+        annotator,
+        on_entry: Callable[[dict[str, Any]], None] | None = None,
+        on_delta: Callable[[dict[str, Any]], None] | None = None,
+    ):
         self.settings = settings
         #: Reused for its client construction, pricing, and usage meter.
         self._annotator = annotator
         self.on_entry = on_entry
+        #: Called with partial text while the entry is still being written.
+        self.on_delta = on_delta
 
         self.entries: list[dict[str, Any]] = []
         self.enabled = False
@@ -264,7 +272,18 @@ class Narrator:
         if overflow:
             body += f"\n\n(and {overflow} further changed symbols in the same burst)"
 
-        response = client.messages.create(
+        stream_id = f"n{int(time.time() * 1000)}"
+        paths = sorted({e["path"] for e in entries})
+        if self.on_delta:
+            self.on_delta({"id": stream_id, "state": "start", "paths": paths, "count": len(fresh)})
+
+        # Streamed so the pane fills in as the model writes, rather than the
+        # entry appearing all at once several seconds later.
+        buffer = ""
+        last_headline = ""
+        last_detail = ""
+
+        with client.messages.stream(
             model=self.settings.model,
             max_tokens=1024,
             system=[
@@ -280,7 +299,31 @@ class Narrator:
             tools=[NARRATE_TOOL],
             tool_choice={"type": "tool", "name": "narrate_step"},
             messages=[{"role": "user", "content": body}],
-        )
+        ) as stream:
+            for event in stream:
+                if getattr(event, "type", None) != "content_block_delta":
+                    continue
+                delta = getattr(event, "delta", None)
+                chunk = getattr(delta, "partial_json", None)
+                if not chunk:
+                    continue
+                buffer += chunk
+                # The forced tool call arrives as partial JSON, so pull the
+                # fields out of the incomplete document as they grow.
+                headline = _partial_string(buffer, "headline") or ""
+                detail = _partial_string(buffer, "detail") or ""
+                if self.on_delta and (headline != last_headline or detail != last_detail):
+                    last_headline, last_detail = headline, detail
+                    self.on_delta(
+                        {
+                            "id": stream_id,
+                            "state": "delta",
+                            "headline": headline,
+                            "detail": detail,
+                        }
+                    )
+
+            response = stream.get_final_message()
 
         self._annotator._record_usage(response)
 
@@ -288,14 +331,17 @@ class Narrator:
             if block.type == "tool_use" and block.name == "narrate_step":
                 data = dict(block.input)
                 return {
+                    "id": stream_id,
                     "at": time.time(),
                     "headline": data.get("headline", ""),
                     "detail": data.get("detail", ""),
                     "phase": data.get("phase", "unclear"),
                     "symbols": [e["id"] for e in entries],
-                    "paths": sorted({e["path"] for e in entries}),
+                    "paths": paths,
                     "count": len(fresh),
                 }
+        if self.on_delta:
+            self.on_delta({"id": stream_id, "state": "abort"})
         return None
 
 
@@ -307,3 +353,49 @@ def _symbol_source(text: str | None, change) -> str | None:
     start = max(0, change.line - 1)
     span = max(change.added, change.removed, 1)
     return "\n".join(lines[start : min(len(lines), start + span)])
+
+
+def _partial_string(buffer: str, field: str) -> str | None:
+    """Read a string field out of incomplete JSON.
+
+    A forced tool call streams as `input_json_delta` fragments, so the document
+    is invalid JSON until the very end. To show text as it arrives we scan the
+    partial buffer directly and return whatever of the value exists so far.
+    """
+    marker = f'"{field}"'
+    start = buffer.find(marker)
+    if start == -1:
+        return None
+    colon = buffer.find(":", start + len(marker))
+    if colon == -1:
+        return None
+    quote = buffer.find('"', colon + 1)
+    if quote == -1:
+        return None
+
+    escapes = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f"}
+    out: list[str] = []
+    escaped = False
+    index = quote + 1
+    while index < len(buffer):
+        char = buffer[index]
+        if escaped:
+            if char == "u":
+                # \uXXXX may be split across chunks; emit it once complete.
+                if index + 4 < len(buffer):
+                    try:
+                        out.append(chr(int(buffer[index + 1 : index + 5], 16)))
+                    except ValueError:
+                        pass
+                    index += 4
+            else:
+                out.append(escapes.get(char, char))
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            break
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)

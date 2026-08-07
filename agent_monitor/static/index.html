@@ -51,6 +51,16 @@
 
   <!-- ───────────────────────── panes ───────────────────────── -->
   <main id="panes">
+    <section class="pane pane-narrative" id="pane-narrative">
+      <div class="pane-head">
+        <h2>Narrative</h2>
+        <span class="pane-sub" id="narrative-sub"></span>
+      </div>
+      <div id="narrative-list" class="narrative-list"></div>
+    </section>
+
+    <div id="splitter-narrative" class="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+
     <section class="pane" id="pane-structure">
       <div class="pane-head">
         <h2>Structure</h2>
@@ -60,7 +70,7 @@
       <div class="pane-empty" id="structure-empty" hidden></div>
     </section>
 
-    <div id="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+    <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
 
     <section class="pane" id="pane-flow">
       <div class="pane-head">
@@ -76,19 +86,9 @@
   <footer id="feed">
     <div class="feed-head">
       <span class="dot-live" id="live-dot"></span>
-      <div class="feed-tabs" role="tablist">
-        <button class="feed-tab is-active" data-tab="activity" role="tab">Activity</button>
-        <button class="feed-tab" data-tab="narrative" role="tab">
-          Narrative<span class="tab-badge" id="narrative-badge" hidden></span>
-        </button>
-      </div>
+      <span>Activity</span>
     </div>
-
-    <div class="feed-body">
-      <ol id="feed-list" class="feed-list" data-panel="activity"></ol>
-      <div id="narrative-list" class="narrative-list" data-panel="narrative" hidden></div>
-    </div>
-
+    <ol id="feed-list" class="feed-list"></ol>
     <div class="legend" id="legend"></div>
   </footer>
 
