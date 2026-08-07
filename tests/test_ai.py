@@ -635,3 +635,45 @@ def test_reference_tokens_never_reach_the_reader():
     assert _scrub_refs("adds a `_usage_lock` field") == "adds a `_usage_lock` field"
     assert _scrub_refs("renames `sha256` to `s3hash`") == "renames `sha256` to `s3hash`"
     assert _scrub_refs(None) is None
+
+
+class _MalformedClient(_StubClient):
+    """Answers with strings where the schema demanded objects.
+
+    Observed for real on a branch review: one batch returned bare theme names
+    and the AttributeError took down the whole review, losing the work the
+    other batches had already done.
+    """
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        tool = kwargs["tool_choice"]["name"]
+        if tool != "annotate_changeset":
+            return _Response(tool, self._payload_for(tool))
+        text = kwargs["messages"][0]["content"]
+        ids = re.findall(r"^\[([^\]]+)\]$", text, re.MULTILINE)
+        return _Response(
+            tool,
+            {
+                "summaries": [{"id": ids[0], "text": "fine"}, "not an object", None],
+                "risk": ["also not an object"],
+                "themes": ["bare theme name", {"name": "real", "members": ids[:1]}],
+                "review_note": "note",
+            },
+        )
+
+
+def test_a_malformed_batch_does_not_lose_the_whole_review(tmp_path: Path):
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    annotator = AiAnnotator(settings)
+    annotator._client = lambda: _MalformedClient()
+
+    (Path(engine.target.root) / "app.py").write_text(
+        "def alpha():\n    return 2\n\ndef beta():\n    return 3\n"
+    )
+    engine.rescan()
+
+    result = _annotate(engine, annotator)  # must not raise
+    assert [s["text"] for s in result["summaries"]] == ["fine"]
+    assert [t["name"] for t in result["themes"]] == ["real"]
+    engine.close()

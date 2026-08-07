@@ -53,6 +53,13 @@ _REF_PAREN = re.compile(r"\s*\((?:\s*`?s\d+`?\s*[,;/]?)+\)")
 _REF_TOKEN = re.compile(r"`s\d+`")
 
 
+def _dicts(value: Any) -> list[dict]:
+    """Only the dict entries of what should have been a list of objects."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 def _scrub_refs(text: str | None) -> str | None:
     """Strip addressing tokens out of prose meant for a human.
 
@@ -92,7 +99,7 @@ def _resolver(refs: dict[str, Any]):
     return resolve
 
 
-def _merge_themes(themes: list[dict]) -> list[dict]:
+def _merge_themes(themes: list[Any]) -> list[dict]:
     """Fold per-batch themes into one set, unioning members of same-named ones.
 
     Each batch names its own themes, so a large changeset yields a dozen
@@ -101,6 +108,8 @@ def _merge_themes(themes: list[dict]) -> list[dict]:
     """
     merged: dict[str, dict] = {}
     for theme in themes:
+        if not isinstance(theme, dict):
+            continue
         name = theme.get("name")
         if not name:
             continue
@@ -325,17 +334,22 @@ class AiAnnotator:
         for (batch, refs, _entries, _trunc), part in zip(plan, parts):
             resolve = _resolver(refs)
 
-            for item in part.get("summaries", []):
+            # Everything below is model output: shaped by a tool schema, but not
+            # guaranteed by it. A batch that answered with bare strings where
+            # objects were required used to take the whole review down with an
+            # AttributeError, losing the other batches' work too.
+            for item in _dicts(part.get("summaries")):
                 node_id = resolve(item.get("id"))
                 if node_id:
                     summaries.append({"id": node_id, "text": _scrub_refs(item.get("text"))})
-            for item in part.get("risk", []):
+            for item in _dicts(part.get("risk")):
                 node_id = resolve(item.get("id"))
                 if node_id:
                     risk.append({**item, "id": node_id, "reason": _scrub_refs(item.get("reason"))})
-            for theme in part.get("themes", []):
-                members = [resolve(m) for m in theme.get("members", [])]
-                themes.append({**theme, "members": [m for m in members if m]})
+            for theme in _dicts(part.get("themes")):
+                members = theme.get("members")
+                resolved = [resolve(m) for m in members] if isinstance(members, list) else []
+                themes.append({**theme, "members": [m for m in resolved if m]})
             note = note or _scrub_refs(part.get("review_note", "")) or ""
 
             # Cache only what actually came back. Marking a skipped symbol as

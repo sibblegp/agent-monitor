@@ -25,7 +25,7 @@ const STATUS_COLOR = {
   renamed: 'var(--modified)',
 };
 
-let loading = false;
+let loading = 0; // ticket of the newest in-flight load
 let lastKey = null; // comparison the current notes describe
 
 function text(tag, cls, value) {
@@ -147,19 +147,23 @@ function render(data) {
 
 export async function loadReview({ force = false } = {}) {
   const against = el.base.value || '';
-  if (loading) return;
   if (!force && lastKey === against && el.body.childElementCount) return;
 
-  loading = true;
-  el.body.replaceChildren(text('div', 'review-empty', 'Reading the diff…'));
+  // A cold review takes tens of seconds. Refusing to start a second one while
+  // the first is running meant changing the comparison mid-load did nothing
+  // visible; instead the newest request wins and the stale answer is dropped.
+  const ticket = ++loading;
+  el.body.replaceChildren(
+    text('div', 'review-empty', 'Reading the diff…' + (against ? ` (vs ${against})` : ''))
+  );
   try {
     const data = await api.review(against);
+    if (ticket !== loading) return;
     lastKey = against;
     render(data);
   } catch (err) {
+    if (ticket !== loading) return;
     el.body.replaceChildren(text('div', 'review-empty', err.message));
-  } finally {
-    loading = false;
   }
 }
 
