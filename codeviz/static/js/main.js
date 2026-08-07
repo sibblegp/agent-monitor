@@ -17,6 +17,7 @@ import { FlowRenderer } from './render/flow.js';
 import { chooseDirectory, initOpenDialog, openInAppBrowser } from './ui/openDialog.js';
 import { renderFeed, renderLegend, setLiveState } from './ui/feed.js';
 import { hideTooltip, showTooltip } from './ui/inspector.js';
+import { initSettings, renderSettings, updateAiStatus } from './ui/settings.js';
 
 // ── element refs ──────────────────────────────────────────────────────
 
@@ -303,7 +304,31 @@ function updateChrome() {
       : 'No resolvable calls in this scope yet.'
     : '';
 
+  if (meta?.ai) updateAiStatus(meta.ai);
   if (meta?.warnings?.length) banner(meta.warnings[0], 'warn');
+}
+
+/** Review-ready summary of the whole changeset, with copy-to-clipboard. */
+function showReviewNote(text) {
+  let box = document.getElementById('review-note');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'review-note';
+    box.className = 'review-note';
+    document.getElementById('app').append(box);
+  }
+  box.innerHTML =
+    '<div class="rn-head"><span>Review note</span>' +
+    '<button class="icon-btn" data-copy title="Copy">\u29c9</button>' +
+    '<button class="icon-btn" data-dismiss title="Dismiss">\u2715</button></div>' +
+    '<p></p>';
+  box.querySelector('p').textContent = text;
+  box.querySelector('[data-copy]').addEventListener('click', () => {
+    navigator.clipboard?.writeText(text);
+    banner('Review note copied', 'info', 1600);
+  });
+  box.querySelector('[data-dismiss]').addEventListener('click', () => box.remove());
+  box.hidden = false;
 }
 
 let bannerTimer = null;
@@ -691,6 +716,9 @@ const live = new Live(
     } else if (message.type === 'ai') {
       store.applyAi(message);
       renderFeed(store);
+      updateAiStatus(message.meta_ai);
+      dirty = true;
+      if (message.review_note) showReviewNote(message.review_note);
     } else if (message.type === 'status') {
       if (message.text) banner(message.text, message.level || 'info');
     } else if (message.type === 'idle') {
@@ -718,8 +746,13 @@ async function boot() {
     else if (command === 'settings') el.settingsDialog.hidden = false;
   });
 
+  initSettings(() => {
+    dirty = true;
+  });
+
   try {
     const state = await api.state();
+    renderSettings(state.settings, state.meta?.ai);
     if (state.has_repo) {
       const payload = await api.snapshot();
       applySnapshot(payload, { refit: true });

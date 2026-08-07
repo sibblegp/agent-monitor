@@ -177,6 +177,13 @@ function buildMenu() {
       label: 'View',
       submenu: [
         { label: 'Fit to Window', accelerator: 'CmdOrCtrl+0', click: () => send('fit') },
+        {
+          // Ctrl+R is bound to a data refresh, so reloading the UI itself
+          // (to pick up frontend changes) needs its own key.
+          label: 'Reload UI',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => win?.reload(),
+        },
         { type: 'separator' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },

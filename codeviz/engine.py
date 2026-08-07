@@ -50,8 +50,11 @@ class Engine:
 
         #: Called (from a worker thread) after a watcher-triggered rescan.
         self.on_update = on_update
+        #: Called after AI annotations arrive; set by the server.
+        self.on_ai_update: Callable[[], None] | None = None
         self._watcher: RepoWatcher | None = None
         self._lock = threading.RLock()
+        self.ai = None  # set by attach_ai()
 
     # ------------------------------------------------------------------
     # opening
@@ -114,9 +117,66 @@ class Engine:
             self.rescan()
         if self.on_update is not None:
             self.on_update()
+        self.request_ai()
 
     def close(self) -> None:
         self._stop_watcher()
+
+    # ------------------------------------------------------------------
+    # optional AI annotations
+    # ------------------------------------------------------------------
+
+    def attach_ai(self, annotator) -> None:
+        self.ai = annotator
+
+    def _symbol_hashes(self) -> dict[str, str]:
+        """node id -> semantic body hash, so annotations cache per symbol."""
+        from .model import sym_id  # local import keeps module import cheap
+
+        out: dict[str, str] = {}
+        for path, pf in self.parsed.items():
+            for symbol in pf.symbols.values():
+                out[sym_id(path, symbol.qualname)] = symbol.body_hash
+        return out
+
+    def _read_side(self, ref: str | None, path: str) -> str | None:
+        return _decode(gitutil.read_side(self.target.root, ref, path)) if self.target else None
+
+    def request_ai(self) -> None:
+        """Kick off annotation for the current changeset, if AI is enabled."""
+        if self.ai is None or self.target is None:
+            return
+        if not self.ai.settings.ai_enabled:
+            return
+        langs: dict[str, int] = {}
+        for pf in self.parsed.values():
+            langs[pf.lang] = langs.get(pf.lang, 0) + 1
+        self.ai.annotate_async(
+            self.target,
+            self.changeset,
+            langs,
+            sorted(self.parsed),
+            self._read_side,
+            self._symbol_hashes(),
+        )
+
+    def apply_ai(self, result: dict[str, Any]) -> None:
+        """Merge annotations onto the graph so they ride along in snapshots."""
+        self._ai = result
+        for item in result.get("summaries", []):
+            node = self.graph.nodes.get(item.get("id"))
+            if node is not None:
+                node.summary = item.get("text")
+        for item in result.get("risk", []):
+            node = self.graph.nodes.get(item.get("id"))
+            if node is not None:
+                node.risk = item.get("level")
+                node.risk_reason = item.get("reason")
+        for theme in result.get("themes", []):
+            for node_id in theme.get("members", []):
+                node = self.graph.nodes.get(node_id)
+                if node is not None:
+                    node.theme = theme.get("name")
 
     # ------------------------------------------------------------------
     # parsing
@@ -338,6 +398,7 @@ class Engine:
             "scan_ms": self.last_scan_ms,
             "watching": self.watch_mode,
             "paused": self.paused,
+            "ai": self.ai.status() if self.ai is not None else None,
             "cache": self.cache.stats(),
             "changed_files": len(self.changeset.files),
             "changed_symbols": sum(

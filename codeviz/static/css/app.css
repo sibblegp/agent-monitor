@@ -405,6 +405,30 @@ kbd {
 .search-bar li:hover, .search-bar li.is-cursor { background: rgba(56, 189, 248, 0.14); }
 .search-bar .s-path { color: var(--text-faint); font-size: 10.5px; margin-left: auto; }
 
+/* ───────────────────────── AI review note ───────────────────────── */
+
+.review-note {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--feed-h) + 14px);
+  z-index: 30;
+  width: min(400px, 34vw);
+  padding: 10px 12px;
+  background: rgba(16, 20, 27, 0.97);
+  border: 1px solid rgba(160, 107, 255, 0.4);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  animation: pop 0.22s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.review-note .rn-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  font-size: 9.5px; letter-spacing: 1.2px; text-transform: uppercase;
+  font-weight: 700; color: #c9aaff;
+}
+.review-note .rn-head span { flex: 1; }
+.review-note .rn-head .icon-btn { width: 20px; height: 20px; font-size: 11px; }
+.review-note p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #1e2733; border-radius: 5px; border: 2px solid var(--bg-panel); }

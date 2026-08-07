@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import fsbrowse, gitutil, recents
+from .ai import AiAnnotator
 from .config import Settings
 from .engine import Engine
 
@@ -72,6 +73,14 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             )
 
         engine.on_update = notify
+
+        def ai_arrived(result: dict[str, Any]) -> None:
+            engine.apply_ai(result)
+            asyncio.run_coroutine_threadsafe(
+                hub.broadcast("ai", {**result, "meta_ai": engine.meta().get("ai")}), loop
+            )
+
+        engine.attach_ai(AiAnnotator(settings, on_result=ai_arrived))
         # A repo opened via the CLI starts watching only once the loop exists.
         engine._start_watcher()
 
@@ -207,7 +216,10 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             settings.set_key(body.get("api_key"), bool(body.get("remember")))
         if "ai_enabled" in body:
             settings.ai_enabled = bool(body["ai_enabled"])
-        return settings.public()
+            if settings.ai_enabled and engine.target is not None:
+                # Annotate what's on screen now, don't wait for the next edit.
+                engine.request_ai()
+        return {**settings.public(), "ai": engine.meta().get("ai")}
 
     # ---- websocket ----------------------------------------------------
 
