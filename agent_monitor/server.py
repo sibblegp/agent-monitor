@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import fsbrowse, gitutil, recents
-from .ai import AiAnnotator
+from .ai import AiAnnotator, Narrator
 from .config import Settings
 from .engine import Engine
 
@@ -47,6 +47,17 @@ class Hub:
                 await ws.send_json(message)
             except Exception:
                 await self.leave(ws)
+
+    async def close_all(self) -> None:
+        """Drop every client so a shutdown isn't held open by an idle tab."""
+        async with self._lock:
+            targets = list(self._clients)
+            self._clients.clear()
+        for ws in targets:
+            try:
+                await ws.close(code=1001)  # going away
+            except Exception:
+                pass
 
     @property
     def count(self) -> int:
@@ -80,13 +91,24 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
                 hub.broadcast("ai", {**result, "meta_ai": engine.meta().get("ai")}), loop
             )
 
-        engine.attach_ai(AiAnnotator(settings, on_result=ai_arrived))
+        def narration_arrived(entry: dict[str, Any]) -> None:
+            asyncio.run_coroutine_threadsafe(
+                hub.broadcast("narration", {"entry": entry}), loop
+            )
+
+        annotator = AiAnnotator(settings, on_result=ai_arrived)
+        narrator = Narrator(settings, annotator, on_entry=narration_arrived)
+        engine.attach_ai(annotator, narrator)
         # A repo opened via the CLI starts watching only once the loop exists.
         engine._start_watcher()
 
     @app.on_event("shutdown")
     async def _teardown() -> None:
         engine.close()
+        # A still-open browser tab holds its websocket forever, and uvicorn's
+        # graceful shutdown waits for live connections — so SIGTERM would hang
+        # and the process kept the port bound. Close them explicitly.
+        await hub.close_all()
 
     # ---- auth ---------------------------------------------------------
 
@@ -119,6 +141,7 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             "settings": settings.public(),
             "recents": recents.listing(),
             "has_repo": engine.target is not None,
+            "narration": engine.narrator.entries if engine.narrator else [],
         }
 
     @app.get("/api/snapshot")
@@ -216,6 +239,8 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             settings.set_key(body.get("api_key"), bool(body.get("remember")))
         if "ai_enabled" in body:
             settings.ai_enabled = bool(body["ai_enabled"])
+            if engine.narrator is not None:
+                engine.narrator.set_enabled(settings.ai_enabled)
             if settings.ai_enabled and engine.target is not None:
                 # Annotate what's on screen now, don't wait for the next edit.
                 engine.request_ai()
@@ -233,6 +258,10 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
         try:
             if engine.target is not None:
                 await ws.send_json({"type": "snapshot", **engine.snapshot()})
+                if engine.narrator and engine.narrator.entries:
+                    await ws.send_json(
+                        {"type": "narration_all", "entries": engine.narrator.entries}
+                    )
             else:
                 await ws.send_json({"type": "idle", "recents": recents.listing()})
             while True:

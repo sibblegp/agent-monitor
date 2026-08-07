@@ -20,6 +20,7 @@ dependencies = [
 ai = ["anthropic>=0.40"]
 ts = ["tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
 all = ["anthropic>=0.40", "tree-sitter>=0.23", "tree-sitter-language-pack>=0.7"]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 agent-monitor = "agent_monitor.__main__:main"
@@ -29,3 +30,6 @@ include = ["agent_monitor*"]
 
 [tool.setuptools.package-data]
 agent_monitor = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

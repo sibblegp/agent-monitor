@@ -102,6 +102,83 @@ ANNOTATE_TOOL = {
 }
 
 
+NARRATE_SYSTEM = """You are narrating, live, what a coding agent is doing to a repository.
+
+You get the symbols that changed since your previous entry, plus the last few
+entries you wrote. Write the next entry in that running commentary.
+
+This is a play-by-play, not a summary. Rules:
+
+- Describe only what is NEW since your last entry. Never re-describe earlier
+  work; the reader already saw it.
+- Continue the thread. If your previous entry said a class was being added and
+  now its callers changed, say it's being wired in — don't restart the story.
+- Say what the agent appears to be *doing*, and why it follows from what came
+  before. "adding retry handling to the cache layer" beats "modified 3 methods".
+- Be concrete. Name the symbols and files involved.
+- When the intent genuinely isn't clear from the diff, say so plainly and
+  describe the mechanical change instead. Never invent a rationale.
+- Never speculate about work that hasn't appeared in a diff yet.
+- No preamble, no "it looks like the agent is". Just say what's happening.
+"""
+
+NARRATE_TOOL = {
+    "name": "narrate_step",
+    "description": "Record one entry in the running commentary. Call this exactly once.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "headline": {
+                "type": "string",
+                "description": "3-7 words, lower case, no trailing period. What just happened.",
+            },
+            "detail": {
+                "type": "string",
+                "description": (
+                    "One or two sentences continuing the commentary. Concrete, "
+                    "names the symbols involved, and connects to the previous entry "
+                    "when there is a connection."
+                ),
+            },
+            "phase": {
+                "type": "string",
+                "enum": [
+                    "scaffolding",
+                    "implementing",
+                    "refactoring",
+                    "wiring",
+                    "testing",
+                    "fixing",
+                    "cleanup",
+                    "docs",
+                    "unclear",
+                ],
+                "description": "The kind of work this step represents.",
+            },
+        },
+        "required": ["headline", "detail", "phase"],
+        "additionalProperties": False,
+    },
+}
+
+
+def build_narration(recent: list[dict], entries: list[dict]) -> str:
+    """Prompt body: what you already said, then what's new."""
+    parts: list[str] = []
+
+    if recent:
+        parts.append("Your previous entries, oldest first:")
+        for item in recent:
+            parts.append(f"  - {item['headline']}: {item['detail']}")
+        parts.append("")
+    else:
+        parts.append("This is your first entry — there is no prior commentary.\n")
+
+    parts.append("Changed since your last entry:")
+    parts.append(build_changes(entries))
+    return "\n".join(parts)
+
+
 def build_context(repo_name: str, langs: dict[str, int], tree: list[str]) -> str:
     """Stable prefix describing the repo — cached across calls."""
     lang_summary = ", ".join(f"{k} ({v})" for k, v in sorted(langs.items()) if k != "other")

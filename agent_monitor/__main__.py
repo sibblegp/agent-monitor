@@ -104,7 +104,15 @@ def main(argv: list[str] | None = None) -> int:
     from .server import create_app
 
     app = create_app(engine, settings, token)
-    config = uvicorn.Config(app, log_level="warning", access_log=False)
+    config = uvicorn.Config(
+        app,
+        log_level="warning",
+        access_log=False,
+        # Backstop for the same problem the shutdown handler solves: never let a
+        # stuck connection keep the process alive holding the port, because the
+        # Electron shell SIGTERMs us on quit and then tries to rebind.
+        timeout_graceful_shutdown=4,
+    )
     server = uvicorn.Server(config)
     try:
         server.run(sockets=[sock])

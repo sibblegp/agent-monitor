@@ -47,6 +47,8 @@ class Engine:
         self.truncated: int = 0
         self.paused: bool = False
         self._ai: dict[str, Any] | None = None
+        #: node id -> {summary, risk, risk_reason, theme}. Survives graph rebuilds.
+        self._annotations: dict[str, dict[str, Any]] = {}
 
         #: Called (from a worker thread) after a watcher-triggered rescan.
         self.on_update = on_update
@@ -55,6 +57,7 @@ class Engine:
         self._watcher: RepoWatcher | None = None
         self._lock = threading.RLock()
         self.ai = None  # set by attach_ai()
+        self.narrator = None
 
     # ------------------------------------------------------------------
     # opening
@@ -68,6 +71,9 @@ class Engine:
             self.cache.clear()
             self.parsed = {}
             self._ai = None
+            self._annotations = {}
+            if self.narrator is not None:
+                self.narrator.reset()
             self.mode, self.ref = "live", None
             self.rescan()
         self._start_watcher()
@@ -78,6 +84,9 @@ class Engine:
             self.mode = mode
             self.ref = ref
             self._ai = None
+            self._annotations = {}
+            if self.narrator is not None:
+                self.narrator.reset()
             self.rescan()
         # Only the working tree can change under us; a commit or branch diff is
         # immutable, so stop watching when we're not looking at `live`.
@@ -126,8 +135,9 @@ class Engine:
     # optional AI annotations
     # ------------------------------------------------------------------
 
-    def attach_ai(self, annotator) -> None:
+    def attach_ai(self, annotator, narrator=None) -> None:
         self.ai = annotator
+        self.narrator = narrator
 
     def _symbol_hashes(self) -> dict[str, str]:
         """node id -> semantic body hash, so annotations cache per symbol."""
@@ -143,7 +153,7 @@ class Engine:
         return _decode(gitutil.read_side(self.target.root, ref, path)) if self.target else None
 
     def request_ai(self) -> None:
-        """Kick off annotation for the current changeset, if AI is enabled."""
+        """Kick off annotation and narration for the current changeset."""
         if self.ai is None or self.target is None:
             return
         if not self.ai.settings.ai_enabled:
@@ -151,32 +161,109 @@ class Engine:
         langs: dict[str, int] = {}
         for pf in self.parsed.values():
             langs[pf.lang] = langs.get(pf.lang, 0) + 1
-        self.ai.annotate_async(
-            self.target,
-            self.changeset,
-            langs,
-            sorted(self.parsed),
-            self._read_side,
-            self._symbol_hashes(),
-        )
+        hashes = self._symbol_hashes()
+        args = (self.target, self.changeset, langs, sorted(self.parsed), self._read_side, hashes)
+        self.ai.annotate_async(*args)
+        if self.narrator is not None:
+            # Separate call on a coarser cadence: the transcript narrates the
+            # delta since its last entry, which is a different job from
+            # re-describing the whole changeset.
+            self.narrator.observe(*args)
 
     def apply_ai(self, result: dict[str, Any]) -> None:
-        """Merge annotations onto the graph so they ride along in snapshots."""
+        """Record annotations and merge them onto the current graph.
+
+        They're kept in `_annotations` rather than only on the graph because
+        `rescan()` rebuilds the graph from scratch — writing them straight onto
+        nodes meant every annotation vanished the next time anything changed,
+        so a synopsis would appear and then silently disappear.
+        """
         self._ai = result
+
         for item in result.get("summaries", []):
-            node = self.graph.nodes.get(item.get("id"))
-            if node is not None:
-                node.summary = item.get("text")
+            node_id = item.get("id")
+            if node_id:
+                self._annotations.setdefault(node_id, {})["summary"] = item.get("text")
         for item in result.get("risk", []):
-            node = self.graph.nodes.get(item.get("id"))
-            if node is not None:
-                node.risk = item.get("level")
-                node.risk_reason = item.get("reason")
+            node_id = item.get("id")
+            if node_id:
+                entry = self._annotations.setdefault(node_id, {})
+                entry["risk"] = item.get("level")
+                entry["risk_reason"] = item.get("reason")
         for theme in result.get("themes", []):
             for node_id in theme.get("members", []):
-                node = self.graph.nodes.get(node_id)
-                if node is not None:
-                    node.theme = theme.get("name")
+                if node_id:
+                    self._annotations.setdefault(node_id, {})["theme"] = theme.get("name")
+
+        self._reapply_annotations()
+
+    def _reapply_annotations(self) -> None:
+        """Re-attach stored annotations after a graph rebuild, then roll up."""
+        if not self._annotations:
+            return
+        for node_id, values in self._annotations.items():
+            node = self.graph.nodes.get(node_id)
+            if node is None:
+                continue
+            if values.get("summary"):
+                node.summary = values["summary"]
+            if values.get("risk"):
+                node.risk = values["risk"]
+                node.risk_reason = values.get("risk_reason")
+            if values.get("theme"):
+                node.theme = values["theme"]
+        self._derive_container_summaries()
+
+    def _derive_container_summaries(self) -> None:
+        """Give changed files, classes, and directories a synopsis too.
+
+        The model annotates individual symbols, but hovering a changed *file*
+        should say something as well. Composing the file's synopsis from its
+        changed children keeps it accurate and costs nothing extra.
+        """
+        children: dict[str, list[Node]] = {}
+        for node in self.graph.nodes.values():
+            if node.parent:
+                children.setdefault(node.parent, []).append(node)
+
+        _RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+        def visit(node: Node) -> tuple[list[str], str | None]:
+            """Return (summaries at or below this node, worst risk)."""
+            summaries: list[str] = []
+            worst: str | None = None
+
+            if node.summary:
+                summaries.append(node.summary)
+            if node.risk:
+                worst = node.risk
+
+            for child in children.get(node.id, []):
+                child_summaries, child_risk = visit(child)
+                summaries.extend(child_summaries)
+                if child_risk and (
+                    worst is None or _RISK_ORDER.get(child_risk, 0) > _RISK_ORDER.get(worst, 0)
+                ):
+                    worst = child_risk
+
+            is_container = node.kind in ("root", "dir", "file", "class")
+            if is_container and node.status in CHANGED_STATUSES:
+                own = [s for s in summaries if s and s != node.summary]
+                if not node.summary and own:
+                    shown = own[:3]
+                    text = "; ".join(shown)
+                    if len(own) > len(shown):
+                        text += f"; +{len(own) - len(shown)} more"
+                    node.summary = text
+                if not node.risk and worst:
+                    node.risk = worst
+                    node.risk_reason = "highest risk among the changes inside"
+
+            return summaries, worst
+
+        root = self.graph.nodes.get(ROOT_ID)
+        if root is not None:
+            visit(root)
 
     # ------------------------------------------------------------------
     # parsing
@@ -331,6 +418,8 @@ class Engine:
         graph = build_structure(target, parsed, self.changeset)
         build_flow(target, parsed, graph)
         self.graph = graph
+        # The graph is derived state; annotations are not. Re-attach them.
+        self._reapply_annotations()
 
         reason = ts_unavailable_reason()
         if reason and any(
@@ -399,6 +488,7 @@ class Engine:
             "watching": self.watch_mode,
             "paused": self.paused,
             "ai": self.ai.status() if self.ai is not None else None,
+            "narration": self.narrator.status() if self.narrator is not None else None,
             "cache": self.cache.stats(),
             "changed_files": len(self.changeset.files),
             "changed_symbols": sum(

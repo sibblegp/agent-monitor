@@ -76,9 +76,19 @@
   <footer id="feed">
     <div class="feed-head">
       <span class="dot-live" id="live-dot"></span>
-      <span>Activity</span>
+      <div class="feed-tabs" role="tablist">
+        <button class="feed-tab is-active" data-tab="activity" role="tab">Activity</button>
+        <button class="feed-tab" data-tab="narrative" role="tab">
+          Narrative<span class="tab-badge" id="narrative-badge" hidden></span>
+        </button>
+      </div>
     </div>
-    <ol id="feed-list" class="feed-list"></ol>
+
+    <div class="feed-body">
+      <ol id="feed-list" class="feed-list" data-panel="activity"></ol>
+      <div id="narrative-list" class="narrative-list" data-panel="narrative" hidden></div>
+    </div>
+
     <div class="legend" id="legend"></div>
   </footer>
 

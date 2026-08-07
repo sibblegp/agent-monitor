@@ -30,7 +30,7 @@ PRICING = {
     "claude-opus-5": (5.00, 25.00),
 }
 
-MAX_SYMBOLS_PER_CALL = 40
+MAX_SYMBOLS_PER_CALL = 60
 MAX_DIFF_LINES = 60
 MAX_REQUESTS_PER_SESSION = 200
 
@@ -169,6 +169,10 @@ class AiAnnotator:
                 "usage": self.usage,
                 "cached": True,
             }
+
+        # Largest changes first, so when the cap bites it drops trivia rather
+        # than whatever happened to sort last by path.
+        pending.sort(key=lambda item: item[0].added + item[0].removed, reverse=True)
 
         entries = []
         for change, _key in pending[:MAX_SYMBOLS_PER_CALL]:

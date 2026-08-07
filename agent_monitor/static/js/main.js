@@ -18,6 +18,13 @@ import { chooseDirectory, initOpenDialog, openInAppBrowser } from './ui/openDial
 import { renderFeed, renderLegend, setLiveState } from './ui/feed.js';
 import { hideTooltip, showTooltip } from './ui/inspector.js';
 import { initSettings, renderSettings, updateAiStatus } from './ui/settings.js';
+import {
+  addEntry as addNarrativeEntry,
+  initNarrative,
+  renderNarrative,
+  setActive as setNarrativeActive,
+  setEntries as setNarrativeEntries,
+} from './ui/narrative.js';
 
 // ── element refs ──────────────────────────────────────────────────────
 
@@ -71,6 +78,9 @@ const flowScene = new Scene(document.getElementById('canvas-flow'), {
 
 const structureRenderer = new StructureRenderer(structureScene, forceLayout, store);
 const flowRenderer = new FlowRenderer(flowScene, layeredLayout, store);
+
+let currentSettings = null;
+let currentAiStatus = null;
 
 let needsFit = true; // rough fit as soon as anything exists
 let settleFit = 0; // deadline for the second fit, once the force sim calms down
@@ -304,7 +314,10 @@ function updateChrome() {
       : 'No resolvable calls in this scope yet.'
     : '';
 
-  if (meta?.ai) updateAiStatus(meta.ai);
+  if (meta?.ai) {
+    currentAiStatus = { ...meta.ai, enabled: meta.ai.enabled };
+    updateAiStatus(meta.ai);
+  }
   if (meta?.warnings?.length) banner(meta.warnings[0], 'warn');
 }
 
@@ -524,6 +537,24 @@ function closeRef(value) {
 
 el.refDialog.querySelector('[data-close]').addEventListener('click', () => closeRef(null));
 
+// ── footer tabs ───────────────────────────────────────────────────────
+
+function selectFeedTab(name) {
+  for (const tab of document.querySelectorAll('.feed-tab')) {
+    tab.classList.toggle('is-active', tab.dataset.tab === name);
+  }
+  for (const panel of document.querySelectorAll('[data-panel]')) {
+    panel.hidden = panel.dataset.panel !== name;
+  }
+  setNarrativeActive(name === 'narrative');
+  if (name === 'narrative') renderNarrative(store, currentSettings, currentAiStatus);
+}
+
+document.querySelector('.feed-tabs').addEventListener('click', (ev) => {
+  const tab = ev.target.closest('.feed-tab');
+  if (tab) selectFeedTab(tab.dataset.tab);
+});
+
 // ── splitter ──────────────────────────────────────────────────────────
 
 (function splitter() {
@@ -719,6 +750,10 @@ const live = new Live(
       updateAiStatus(message.meta_ai);
       dirty = true;
       if (message.review_note) showReviewNote(message.review_note);
+    } else if (message.type === 'narration') {
+      addNarrativeEntry(message.entry, store, currentSettings, currentAiStatus);
+    } else if (message.type === 'narration_all') {
+      setNarrativeEntries(message.entries, store, currentSettings, currentAiStatus);
     } else if (message.type === 'status') {
       if (message.text) banner(message.text, message.level || 'info');
     } else if (message.type === 'idle') {
@@ -746,13 +781,28 @@ async function boot() {
     else if (command === 'settings') el.settingsDialog.hidden = false;
   });
 
-  initSettings(() => {
+  initSettings((next) => {
+    currentSettings = next;
+    currentAiStatus = next.ai || currentAiStatus;
+    renderNarrative(store, currentSettings, currentAiStatus);
     dirty = true;
+  });
+
+  initNarrative({
+    onFocus: (id) => {
+      store.selected = id;
+      centerOn(id);
+      dirty = true;
+    },
+    onEnable: () => el.aiToggle.click(),
   });
 
   try {
     const state = await api.state();
+    currentSettings = state.settings;
+    currentAiStatus = state.meta?.ai || null;
     renderSettings(state.settings, state.meta?.ai);
+    setNarrativeEntries(state.narration || [], store, currentSettings, currentAiStatus);
     if (state.has_repo) {
       const payload = await api.snapshot();
       applySnapshot(payload, { refit: true });
