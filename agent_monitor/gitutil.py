@@ -467,6 +467,15 @@ def recent_commits(root: str, limit: int = 25) -> list[dict[str, str]]:
     return out
 
 
+def head_info(root: str) -> tuple[str | None, str]:
+    """(sha, subject) of HEAD, or (None, "") in a repo with no commits."""
+    if not has_commits(root):
+        return None, ""
+    raw = _text(root, ["log", "-1", "--format=%H%x00%s"], check=False)
+    sha, _, subject = raw.partition("\0")
+    return (sha.strip() or None), subject.strip()
+
+
 def branches(root: str) -> list[str]:
     raw = _text(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads"], check=False)
     return [b for b in raw.splitlines() if b.strip()]

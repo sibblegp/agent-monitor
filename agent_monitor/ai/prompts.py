@@ -15,6 +15,9 @@ one, produce a short factual summary and a risk assessment, then group the whole
 changeset into a few named themes and write a brief review note.
 
 Rules:
+- Return one summary for EVERY symbol in the input, without exception. A symbol
+  you skip shows the reader nothing at all when they hover it. If a change is
+  too trivial or opaque to interpret, still return an entry and say so plainly.
 - Summaries are one short clause describing what the change *does*, in the
   imperative-free present tense. No preamble, no restating the symbol name.
   Good: "adds exponential backoff between retries"
@@ -41,7 +44,7 @@ ANNOTATE_TOOL = {
         "properties": {
             "summaries": {
                 "type": "array",
-                "description": "One entry per changed symbol you can describe.",
+                "description": "One entry for every changed symbol in the input. Do not omit any.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -162,7 +165,7 @@ NARRATE_TOOL = {
 }
 
 
-def build_narration(recent: list[dict], entries: list[dict]) -> str:
+def build_narration(recent: list[dict], entries: list[dict], opening: bool = False) -> str:
     """Prompt body: what you already said, then what's new."""
     parts: list[str] = []
 
@@ -171,10 +174,20 @@ def build_narration(recent: list[dict], entries: list[dict]) -> str:
         for item in recent:
             parts.append(f"  - {item['headline']}: {item['detail']}")
         parts.append("")
+        parts.append("Changed since your last entry:")
+    elif opening:
+        # First entry over work that was already uncommitted. Frame it as the
+        # state of play rather than as something that just happened.
+        parts.append(
+            "This is your opening entry. The work below was already uncommitted "
+            "before you started watching, so describe where things currently "
+            "stand rather than narrating it as if it just happened.\n"
+        )
+        parts.append("Uncommitted work against HEAD:")
     else:
         parts.append("This is your first entry — there is no prior commentary.\n")
+        parts.append("Changed since your last entry:")
 
-    parts.append("Changed since your last entry:")
     parts.append(build_changes(entries))
     return "\n".join(parts)
 

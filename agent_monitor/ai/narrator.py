@@ -63,7 +63,7 @@ class Narrator:
         self._inflight = False
         self._timer: threading.Timer | None = None
         self._last_at = 0.0
-        self._baseline_done = False
+        self._entries_started = False
 
     # ------------------------------------------------------------------
 
@@ -91,7 +91,7 @@ class Narrator:
             self._seen = {}
             self._prev_source = {}
             self._pending_source = {}
-            self._baseline_done = False
+            self._entries_started = False
             self._last_at = 0.0
 
     def set_enabled(self, value: bool) -> None:
@@ -114,28 +114,46 @@ class Narrator:
             out.append((change, fingerprint))
         return out
 
+    def note_commit(self, head: str, subject: str) -> None:
+        """Record that HEAD moved, and start a new chapter.
+
+        A commit is the natural boundary in this story. It also has to reset the
+        delta tracking: after HEAD moves, previously-narrated symbols are no
+        longer part of the diff, and a later edit could otherwise reproduce a
+        hash still sitting in `_seen` and be silently swallowed.
+        """
+        entry = {
+            "at": time.time(),
+            "headline": f"committed {head[:7]}",
+            "detail": subject or "(no commit message)",
+            "phase": "commit",
+            "symbols": [],
+            "paths": [],
+            "count": 0,
+        }
+        with self._lock:
+            self._seen = {}
+            self._prev_source = {}
+            self._pending_source = {}
+            self.entries.insert(0, entry)
+            del self.entries[MAX_TRANSCRIPT:]
+        if self.on_entry:
+            self.on_entry(entry)
+
     def observe(self, target, changeset, langs, files, read_side, symbol_hashes) -> None:
         """Called after every rescan. Decides whether an entry is warranted."""
         if not self.enabled or not self.settings.ai_enabled:
             return
 
-        # Mark the baseline on the *first observation*, not the first one that
-        # happens to carry changes. Deferring it meant that opening a clean repo
-        # left the baseline unset, so the agent's first real edit was swallowed
-        # as "pre-existing" and never narrated.
-        first_observation = not self._baseline_done
-        self._baseline_done = True
+        # The change set is whatever differs from HEAD — git decides that, not
+        # the session. Work that was already uncommitted when the repo opened is
+        # still work the reader hasn't seen described, so it gets an opening
+        # entry rather than being silently absorbed into a baseline.
+        opening_entry = not self._entries_started
+        self._entries_started = True
 
         fresh = self._fresh_changes(changeset, symbol_hashes)
         if not fresh:
-            return
-
-        if first_observation:
-            # Whatever was already uncommitted when the repo was opened is the
-            # starting point, not news. Record it silently so the transcript
-            # begins when the agent does.
-            for change, fingerprint in fresh:
-                self._seen[change.node_id] = fingerprint
             return
 
         with self._lock:
@@ -146,6 +164,7 @@ class Narrator:
                 # Trailing debounce: let the burst finish, then narrate once.
                 if self._timer is not None:
                     self._timer.cancel()
+                self._entries_started = not opening_entry
                 self._timer = threading.Timer(
                     MIN_INTERVAL_S - elapsed,
                     lambda: self.observe(target, changeset, langs, files, read_side, symbol_hashes),
@@ -157,14 +176,14 @@ class Narrator:
 
         thread = threading.Thread(
             target=self._run,
-            args=(target, changeset, langs, files, read_side, fresh),
+            args=(target, changeset, langs, files, read_side, fresh, opening_entry),
             daemon=True,
         )
         thread.start()
 
-    def _run(self, target, changeset, langs, files, read_side, fresh) -> None:
+    def _run(self, target, changeset, langs, files, read_side, fresh, opening=False) -> None:
         try:
-            entry = self._narrate(target, changeset, langs, files, read_side, fresh)
+            entry = self._narrate(target, changeset, langs, files, read_side, fresh, opening)
             if entry is None:
                 return
             # Only mark work as narrated once an entry actually succeeded, so a
@@ -186,7 +205,7 @@ class Narrator:
             self._last_at = time.monotonic()
             self._inflight = False
 
-    def _narrate(self, target, changeset, langs, files, read_side, fresh) -> dict[str, Any] | None:
+    def _narrate(self, target, changeset, langs, files, read_side, fresh, opening=False) -> dict[str, Any] | None:
         import anthropic  # noqa: PLC0415
 
         from .client import _slice_diff  # noqa: PLC0415
@@ -241,7 +260,7 @@ class Narrator:
             {"headline": e["headline"], "detail": e["detail"]}
             for e in reversed(self.entries[:CONTEXT_ENTRIES])
         ]
-        body = build_narration(recent, entries)
+        body = build_narration(recent, entries, opening=opening)
         if overflow:
             body += f"\n\n(and {overflow} further changed symbols in the same burst)"
 

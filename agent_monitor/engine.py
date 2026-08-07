@@ -49,6 +49,7 @@ class Engine:
         self._ai: dict[str, Any] | None = None
         #: node id -> {summary, risk, risk_reason, theme}. Survives graph rebuilds.
         self._annotations: dict[str, dict[str, Any]] = {}
+        self._head: str | None = None
 
         #: Called (from a worker thread) after a watcher-triggered rescan.
         self.on_update = on_update
@@ -75,6 +76,7 @@ class Engine:
             if self.narrator is not None:
                 self.narrator.reset()
             self.mode, self.ref = "live", None
+            self._head = gitutil.head_info(target.root)[0] if target.is_git else None
             self.rescan()
         self._start_watcher()
         return target
@@ -158,6 +160,15 @@ class Engine:
             return
         if not self.ai.settings.ai_enabled:
             return
+
+        # A commit is a chapter break: HEAD moved, so the diff everything is
+        # measured against moved with it.
+        if self.narrator is not None and self.target.is_git:
+            head, subject = gitutil.head_info(self.target.root)
+            if head and self._head and head != self._head:
+                self.narrator.note_commit(head, subject)
+                self._annotations = {}
+            self._head = head or self._head
         langs: dict[str, int] = {}
         for pf in self.parsed.values():
             langs[pf.lang] = langs.get(pf.lang, 0) + 1

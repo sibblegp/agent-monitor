@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -102,13 +103,13 @@ def _observe(engine, narrator):
 # ── opt-in and failure behaviour ──────────────────────────────────────
 
 
-def test_annotation_requires_a_key():
+def test_annotation_requires_a_key(monkeypatch):
+    """Hermetic: a key saved on the developer's machine must not decide this."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     settings = Settings()
     settings.ai_enabled = True
     settings._session_key = None
-    import os
-
-    os.environ.pop("ANTHROPIC_API_KEY", None)
+    settings._stored_key = None
     annotator = AiAnnotator(settings)
     try:
         annotator._client()
@@ -131,21 +132,30 @@ def test_narration_is_silent_while_disabled(tmp_path: Path):
 # ── transcript semantics ──────────────────────────────────────────────
 
 
-def test_existing_changes_are_the_baseline_not_news(tmp_path: Path):
-    """Opening a dirty repo must not open with commentary about old work."""
+def test_pre_existing_work_gets_an_opening_entry(tmp_path: Path):
+    """The change set is the diff against HEAD — git decides it, not the session.
+
+    Work that was already uncommitted when the repo opened is still work the
+    reader hasn't seen described, so it opens the transcript rather than being
+    silently absorbed.
+    """
     engine, narrator, stub, _ = _harness(tmp_path)
     (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 99\n")
     engine.rescan()
-    _observe(engine, narrator)  # first observation — baseline
-    assert stub.narrations() == []
-    assert narrator.entries == []
+    _observe(engine, narrator)
+
+    assert len(stub.narrations()) == 1
+    prompt = stub.narrations()[0]["messages"][0]["content"]
+    assert "opening entry" in prompt
+    assert "already uncommitted" in prompt
+    assert len(narrator.entries) == 1
     engine.close()
 
 
-def test_first_change_after_the_baseline_is_narrated(tmp_path: Path):
-    """Regression: the baseline used to swallow the first real edit."""
+def test_first_change_is_narrated(tmp_path: Path):
+    """Regression: an early-return once swallowed the first real edit."""
     engine, narrator, stub, _ = _harness(tmp_path)
-    _observe(engine, narrator)  # baseline on a clean tree
+    _observe(engine, narrator)  # clean tree -> nothing to say
 
     (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 2\n")
     engine.rescan()
@@ -296,4 +306,50 @@ def test_changed_files_get_a_derived_synopsis(tmp_path: Path):
     assert "constant" in file_node.summary or "helper" in file_node.summary
     # worst child risk rolls up so a risky change is visible while collapsed
     assert file_node.risk == "high"
+    engine.close()
+
+
+def test_requests_arriving_mid_flight_are_not_dropped(tmp_path: Path):
+    """Regression: edits made during an in-flight call were silently discarded.
+
+    A call takes seconds and agents write in bursts, so most edits land
+    mid-flight. Dropping them left those symbols with no summary and nothing to
+    retry them, which is why hovering a changed node often showed nothing.
+    """
+    engine, _narrator, stub, _ = _harness(tmp_path)
+    annotator = engine.ai
+
+    started = threading.Event()
+    release = threading.Event()
+    real_create = stub.create
+
+    def slow_create(**kwargs):
+        started.set()
+        release.wait(5)
+        return real_create(**kwargs)
+
+    stub.create = slow_create
+
+    app = Path(engine.target.root) / "app.py"
+    app.write_text("def alpha():\n    return 2\n")
+    engine.rescan()
+    engine.request_ai()
+    assert started.wait(5), "first call never started"
+
+    # A second burst arrives while the first call is still running.
+    (Path(engine.target.root) / "second.py").write_text("def beta():\n    return 3\n")
+    engine.rescan()
+    engine.request_ai()
+
+    release.set()
+    for _ in range(100):
+        if not annotator._inflight and annotator._pending_args is None:
+            break
+        time.sleep(0.05)
+
+    annotate_calls = [c for c in stub.calls if c["tool_choice"]["name"] == "annotate_changeset"]
+    assert len(annotate_calls) >= 2, "the mid-flight request was dropped"
+
+    sent = "\n".join(c["messages"][0]["content"] for c in annotate_calls)
+    assert "second.py" in sent, "the symbol added mid-flight was never annotated"
     engine.close()

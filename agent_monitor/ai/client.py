@@ -61,6 +61,7 @@ class AiAnnotator:
         self._cache: dict[tuple[str, str], dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._inflight = False
+        self._pending_args = None
         self._disabled_reason: str | None = None
 
     # ------------------------------------------------------------------
@@ -104,8 +105,20 @@ class AiAnnotator:
         symbol_hashes: dict[str, str],
     ) -> None:
         """Kick off annotation on a worker thread. Safe to call on every update."""
-        if not self.settings.ai_enabled or self._inflight:
+        if not self.settings.ai_enabled:
             return
+
+        with self._lock:
+            if self._inflight:
+                # A call takes seconds and agents write in bursts, so most edits
+                # arrive mid-flight. Dropping them left those symbols with no
+                # summary and nothing to retry them — the annotation simply
+                # never caught up. Remember the latest request and run it when
+                # the current one finishes.
+                self._pending_args = (target, changeset, langs, files, read_side, symbol_hashes)
+                return
+            self._inflight = True
+
         thread = threading.Thread(
             target=self._run,
             args=(target, changeset, langs, files, read_side, symbol_hashes),
@@ -114,10 +127,6 @@ class AiAnnotator:
         thread.start()
 
     def _run(self, target, changeset, langs, files, read_side, symbol_hashes) -> None:
-        with self._lock:
-            if self._inflight:
-                return
-            self._inflight = True
         try:
             result = self.annotate(target, changeset, langs, files, read_side, symbol_hashes)
             if result and self.on_result:
@@ -128,7 +137,13 @@ class AiAnnotator:
         except Exception as exc:  # never let the AI layer break the app
             self.last_error = f"{type(exc).__name__}: {exc}"
         finally:
-            self._inflight = False
+            with self._lock:
+                self._inflight = False
+                queued = self._pending_args
+                self._pending_args = None
+            if queued is not None and self.settings.ai_enabled:
+                # Anything that changed while we were busy still needs covering.
+                self.annotate_async(*queued)
 
     # ------------------------------------------------------------------
 
@@ -149,7 +164,7 @@ class AiAnnotator:
         cached_summaries: list[dict[str, Any]] = []
         cached_risk: list[dict[str, Any]] = []
         for change in changed:
-            key = (change.qualname, symbol_hashes.get(change.node_id, change.status))
+            key = (change.node_id, symbol_hashes.get(change.node_id, change.status))
             hit = self._cache.get(key)
             if hit is not None:
                 if hit.get("summary"):
