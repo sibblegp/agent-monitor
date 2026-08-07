@@ -280,12 +280,21 @@ def create_app(engine: Engine, settings: Settings, token: str) -> FastAPI:
             settings.set_model(str(body["model"]))
         if "api_key" in body:
             settings.set_key(body.get("api_key"), bool(body.get("remember")))
+            # A fresh key invalidates any "no API key" failure recorded before
+            # it existed, and the user expects insights now — not on next edit.
+            if engine.ai is not None:
+                engine.ai.revive()
+            if settings.ai_enabled and engine.target is not None:
+                engine.request_ai()
         if "ai_enabled" in body:
             settings.set_ai_enabled(bool(body["ai_enabled"]))
             if engine.narrator is not None:
                 engine.narrator.set_enabled(settings.ai_enabled)
             if settings.ai_enabled and engine.target is not None:
-                # Annotate what's on screen now, don't wait for the next edit.
+                # Turning it back on is also the natural retry gesture, so
+                # clear any sticky failure before annotating what's on screen.
+                if engine.ai is not None:
+                    engine.ai.revive()
                 engine.request_ai()
         return {**settings.public(), "ai": engine.meta().get("ai")}
 

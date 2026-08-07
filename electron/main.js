@@ -229,6 +229,9 @@ function buildMenu() {
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
     },
+    // Without an Edit menu, macOS routes Cmd+C/V/X/A nowhere — pasting an API
+    // key into Settings silently fails.
+    { role: 'editMenu' },
     {
       label: 'View',
       submenu: [

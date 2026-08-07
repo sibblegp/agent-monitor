@@ -174,6 +174,17 @@ class AiAnnotator:
             "model": self.settings.model,
         }
 
+    def revive(self) -> None:
+        """Forget a sticky failure so annotation can be attempted again.
+
+        `_disabled_reason` exists to stop hammering the API after a hard
+        failure, but "no API key configured" stops being true the moment the
+        user enters one in Settings — without this, the annotator stayed dead
+        until a restart.
+        """
+        self._disabled_reason = None
+        self.last_error = None
+
     def _client(self):
         try:
             import anthropic  # noqa: PLC0415
