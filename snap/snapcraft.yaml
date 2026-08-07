@@ -1,0 +1,141 @@
+name: agentmonitor
+title: Agent Monitor
+base: core24
+adopt-info: backend
+summary: Watch your AI coding agent reshape your codebase, live
+description: |
+  An AI agent rewriting your codebase looks like scrolling text in a terminal.
+  Agent Monitor shows you what it is actually doing — every file, class, and
+  function it touches, lighting up as it happens.
+
+  Three panes, updating while the agent works:
+
+  * Narrative / Review notes — a streamed running commentary on what the agent
+    appears to be doing, and a file-by-file compilation of everything the AI has
+    said about the change, with risk levels.
+  * Structure — repository to directories to files to classes to functions, as
+    a force-directed graph. Changed symbols light up and pulse.
+  * Flow — the static call graph, entry points fanning right through your
+    functions into external packages.
+
+  You can also point it at uncommitted work, a specific commit, or this branch
+  against another, to review the shape of a change before opening a PR.
+
+  Symbol identity is a hash of the AST rather than the source text, so
+  reformatting produces no changes at all — a formatter run will not light up
+  the whole graph, while a docstring edit still counts. Python is fully
+  supported; JavaScript and TypeScript via tree-sitter; every other language
+  still appears at file level, so nothing is invisible.
+
+  AI insights are optional and inert until you add an Anthropic API key in
+  Settings. The key never reaches the frontend and nothing is sent without it.
+
+  Note: as a strictly-confined snap, Agent Monitor can read repositories under
+  your home directory and on removable media. Repositories elsewhere on the
+  filesystem are not visible to it.
+
+grade: stable
+confinement: strict
+license: MIT
+source-code: https://github.com/sibblegp/agent-monitor
+issues: https://github.com/sibblegp/agent-monitor/issues
+contact: https://github.com/sibblegp/agent-monitor/issues
+website: https://agent-monitor.ai/
+
+# Both of these report the same structural thing and neither is actionable: the
+# gnome extension supplies GTK, X11, pango, cairo and mesa from a content snap
+# that is mounted at runtime and simply is not visible while linting, so every
+# Electron library resolves as "missing". The reverse case — NSS and libsecret
+# reported as "unused" — is dlopen, which the linter cannot see either.
+lint:
+  ignore:
+    - library
+    - gpu
+
+# Electron unpacks to a few hundred megabytes and xz would trade startup time
+# for a smaller download. lzo decompresses several times faster, which is what
+# you notice when launching a desktop app.
+compression: lzo
+
+platforms:
+  amd64:
+
+apps:
+  agentmonitor:
+    # A launcher rather than the binary directly, because snapd rejects `=` in
+    # this field and the flags Electron needs here all use it. See the script.
+    command: bin/agent-monitor-launch
+    extensions: [gnome]
+    common-id: net.sibble.agent-monitor
+    plugs:
+      - home              # the user's repositories
+      - removable-media   # ...and repositories on an external disk
+      - network           # the optional Anthropic API calls
+      - network-bind      # the backend binds a loopback port for the UI
+      - browser-support   # Electron's renderer processes
+    environment:
+      # The shell looks for a frozen backend next to itself, the way the macOS
+      # bundle ships one. Here the real Python package is installed into the
+      # snap instead, so point the shell straight at its console script.
+      AGENT_MONITOR_BACKEND: $SNAP/bin/agent-monitor
+      # git is compiled with a hardcoded /usr prefix, so inside the snap it
+      # would look for its helper binaries in the base and find none. These two
+      # send it to the copy we ship.
+      GIT_EXEC_PATH: $SNAP/usr/lib/git-core
+      GIT_TEMPLATE_DIR: $SNAP/usr/share/git-core/templates
+
+parts:
+  # ── the Python backend ───────────────────────────────────────────────
+  # core24 provides python3.12, so this is a plain venv in the snap rather
+  # than the PyInstaller freeze the macOS bundle needs.
+  backend:
+    plugin: python
+    source: .
+    source-type: local
+    build-packages:
+      - python3-dev
+    # The plugin installs the project itself, which only pulls the required
+    # dependencies. The optional extras have to be named to be included, and
+    # both of them matter: without tree-sitter, JavaScript and TypeScript drop
+    # to file-level nodes; without anthropic, the AI panes cannot work at all.
+    python-packages:
+      - anthropic>=0.40
+      - tree-sitter>=0.23
+      - tree-sitter-language-pack>=0.7
+    override-pull: |
+      craftctl default
+      # One version number for the project, read from where it already lives.
+      craftctl set version="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)"
+
+  # ── the Electron shell ───────────────────────────────────────────────
+  shell:
+    plugin: nil
+    source: .
+    source-type: local
+    after: [backend]
+    override-build: |
+      cd "${CRAFT_PART_BUILD}/electron"
+      npm ci
+      # `dir` stops at the unpacked tree: snapcraft does the packaging from
+      # here, so building a deb or an AppImage would only be wasted work.
+      npx electron-builder --linux dir --publish never
+      mkdir -p "${CRAFT_PART_INSTALL}/app" "${CRAFT_PART_INSTALL}/bin"
+      cp -a "${CRAFT_PART_BUILD}/dist-app/linux-unpacked/." "${CRAFT_PART_INSTALL}/app/"
+      install -m 755 "${CRAFT_PART_BUILD}/packaging/snap/launcher.sh" \
+        "${CRAFT_PART_INSTALL}/bin/agent-monitor-launch"
+    stage-packages:
+      # What Electron needs beyond what the gnome extension already supplies.
+      - libnspr4
+      - libnss3
+      - libsecret-1-0
+      - libasound2t64
+      - libcups2t64
+
+  # ── git ──────────────────────────────────────────────────────────────
+  # Not optional and not bundlable any other way: the backend reads history by
+  # shelling out to git, and core24 has none. Without this the app opens a
+  # window that analyses nothing.
+  git:
+    plugin: nil
+    stage-packages:
+      - git

@@ -7,15 +7,19 @@ venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
-build/
-dist/
+# Anchored: these are PyInstaller's output at the repo root. Unanchored, the
+# `build/` rule also swallows electron/build/, which holds the committed app
+# icon — silently, since ignoring a file is never an error.
+/build/
+/dist/
 
 # node / electron
 node_modules/
 electron/node_modules/
 
-# packaged app bundles (built by packaging/build-macos.sh)
+# packaged app bundles (packaging/build-macos.sh, packaging/build-snap.sh)
 dist-app/
+dist-snap/
 
 # agent_monitor
 .agent-monitor-cache/

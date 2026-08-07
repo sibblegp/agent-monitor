@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Agent Monitor
+GenericName=Agent code visualizer
+Comment=Watch an AI agent reshape your codebase, live
+Icon=${SNAP}/meta/gui/agentmonitor.png
+Exec=agentmonitor
+Terminal=false
+Categories=Development;IDE;RevisionControl;
+Keywords=ai;agent;claude;code;review;diff;git;visualization;graph;
+StartupNotify=true
+# Electron is launched with --class=agentmonitor so the running window matches
+# this entry; without them agreeing the taskbar shows a generic icon next to
+# the app rather than ours.
+StartupWMClass=agentmonitor

@@ -32,6 +32,16 @@ review the shape of a change before opening a PR.
 [latest release](https://github.com/sibblegp/agent-monitor/releases/latest).
 Nothing else to install.
 
+**Linux** — from the Snap Store:
+
+```bash
+sudo snap install agentmonitor
+```
+
+It carries its own `git` and needs nothing else installed. Being strictly
+confined, it can open repositories under your home directory and on removable
+media — repositories elsewhere on the filesystem are not visible to it.
+
 **From source** — requires Python 3.10+ and `git`.
 
 ```bash
@@ -98,12 +108,45 @@ still works unchanged.
 `git` remains a runtime requirement — it cannot be bundled, and the app checks
 for it at launch and says so rather than opening a window that analyses nothing.
 
+**Icons.** All of them come from `packaging/icon.svg`; run
+`./packaging/make-icons.sh` after editing it. electron-builder derives the
+`.icns` from the 1024px PNG, so there is no binary icon format to hand-maintain.
+
 **Signing.** An unsigned build runs fine but Gatekeeper blocks the first launch;
 right-click → Open, or `xattr -dr com.apple.quarantine "/Applications/Agent
 Monitor.app"`. To sign and notarize properly you need an Apple Developer
 account: export `CSC_NAME`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
 `APPLE_TEAM_ID`, then run `./packaging/build-macos.sh --signed`. The hardened
 runtime entitlements this needs are in `packaging/entitlements.mac.plist`.
+
+## Build the Linux snap
+
+```bash
+./packaging/build-snap.sh
+```
+
+Produces `dist-app/agentmonitor_<version>_amd64.snap`. Unlike the macOS build,
+this one runs anywhere Docker does: snapcraft normally builds inside an LXD or
+Multipass VM, and where there is neither, the container *is* that clean
+environment and snapcraft runs in destructive mode inside it.
+
+Everything is pinned to one generation — Ubuntu 24.04 as the build host,
+`core24` as the base, and the core24-based snapcraft. They cannot be mixed:
+snapcraft ships its own Python built against its base's glibc, so a core24
+snapcraft will not even exec on a 22.04 host, and building a core22 snap on
+24.04 links the parts against a glibc the base doesn't have.
+
+The snap carries a Python venv rather than the PyInstaller freeze the macOS
+bundle needs, because `core24` already provides python3.12. It also carries its
+own `git`: the backend reads history by shelling out to it, and the base has
+none, so without it the app would open a window that analyses nothing.
+
+Publishing:
+
+```bash
+./packaging/publish-snap.sh login    # once — stores scoped credentials at 0600
+./packaging/publish-snap.sh edge     # then: beta, candidate, stable
+```
 
 ## Try it without an agent
 

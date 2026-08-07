@@ -22,14 +22,20 @@
       "buildResources": "build"
     },
     "files": ["main.js", "preload.js", "package.json"],
-    "extraResources": [
-      {
-        "from": "../dist/agent-monitor-backend",
-        "to": "backend"
-      }
-    ],
+    "linux": {
+      "category": "Development",
+      "target": ["dir"],
+      "executableName": "agent-monitor",
+      "icon": "build/icon.png"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
+      "extraResources": [
+        {
+          "from": "../dist/agent-monitor-backend",
+          "to": "backend"
+        }
+      ],
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }

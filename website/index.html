@@ -53,7 +53,7 @@
           <div class="hero-ctas">
             <a class="btn btn-primary" href="https://github.com/sibblegp/agent-monitor/releases/latest">Download for macOS</a>
             <a class="btn btn-ghost" href="https://github.com/sibblegp/agent-monitor">View on GitHub</a>
-            <p class="cta-note">Apple Silicon &middot; DMG &middot; signed &amp; notarized</p>
+            <p class="cta-note">Apple Silicon &middot; signed &amp; notarized<br>Linux: <span class="mono">snap install agentmonitor</span></p>
           </div>
         </div>
         <div class="hero-stage">
@@ -278,6 +278,15 @@
             <p class="fine">Apple Silicon. Signed and notarized by Apple &mdash; opens like any Mac app.</p>
           </div>
           <div class="card" data-reveal style="--i: 2">
+            <h3>Install on Linux</h3>
+            <p>From the Snap Store. Ships its own <span class="mono">git</span> — nothing else to install.</p>
+            <div class="code-block">
+              <button class="copy-btn" type="button" data-copy="sudo snap install agentmonitor" aria-live="polite">Copy</button>
+              <div><span class="dim">$</span> sudo snap install agentmonitor</div>
+            </div>
+            <p class="fine">Strictly confined &mdash; opens repositories under your home directory and on removable media.</p>
+          </div>
+          <div class="card" data-reveal style="--i: 3">
             <h3>Run from source</h3>
             <p>Python 3.10+ and git. Native window via Electron, or add <span class="mono">--browser</span>.</p>
             <div class="code-block">

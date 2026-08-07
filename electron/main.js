@@ -42,11 +42,17 @@ function repoArg() {
 }
 
 /**
- * The frozen backend shipped inside the app bundle, if there is one.
+ * The backend the app carries with it, if there is one.
  *
  * A packaged app cannot assume a Python exists on the machine, let alone one
- * with the dependencies installed, so the release carries its own. In a source
- * checkout this returns null and the interpreter search below takes over.
+ * with the dependencies installed, so the release carries its own. Two shapes
+ * of that: the macOS build ships a PyInstaller-frozen binary as an Electron
+ * resource, while the snap installs the real package into the snap and names
+ * its launcher in AGENT_MONITOR_BACKEND — there is no `resourcesPath/backend`
+ * there, and no system Python to fall back to either.
+ *
+ * In a source checkout both are absent, this returns null, and the interpreter
+ * search below takes over.
  *
  * Keyed on the file actually being there rather than on `app.isPackaged`: some
  * distributions' electron wrappers export ELECTRON_FORCE_IS_PACKAGED=true, so
@@ -54,9 +60,37 @@ function repoArg() {
  * launched from the wrong directory.
  */
 function bundledBackend() {
+  const declared = process.env.AGENT_MONITOR_BACKEND;
+  if (declared && fs.existsSync(declared)) return declared;
   const exe = process.platform === 'win32' ? 'agent-monitor-backend.exe' : 'agent-monitor-backend';
   const candidate = path.join(process.resourcesPath ?? '', 'backend', exe);
   return fs.existsSync(candidate) ? candidate : null;
+}
+
+/**
+ * The user's real home directory.
+ *
+ * A confined snap gets $HOME repointed at its own private data directory, so
+ * the folder picker would otherwise open somewhere containing none of the
+ * user's code. SNAP_REAL_HOME is unset outside a snap, so this is a no-op
+ * everywhere else.
+ */
+function realHome() {
+  return process.env.SNAP_REAL_HOME || app.getPath('home');
+}
+
+/**
+ * Where to run the backend from.
+ *
+ * A source checkout has to run from the project root: `agent_monitor` is
+ * importable from there without being pip-installed. A frozen binary carries
+ * its own modules and can just run where it lives. A snap's backend sits on a
+ * read-only squashfs, which is no place to have a working directory, so it
+ * gets the user's home instead.
+ */
+function backendCwd(bundled) {
+  if (!bundled) return ROOT;
+  return process.env.SNAP ? realHome() : path.dirname(bundled);
 }
 
 /**
@@ -101,10 +135,7 @@ function startBackend() {
     const args = bundled ? flags : ['-m', 'agent_monitor', ...flags];
 
     const child = spawn(exe, args, {
-      // From a source checkout the project root has to be the working directory:
-      // `agent_monitor` is importable from there without being pip-installed.
-      // The frozen binary carries its own modules and just runs where it lives.
-      cwd: bundled ? path.dirname(bundled) : ROOT,
+      cwd: backendCwd(bundled),
       env: { ...process.env, PYTHONUNBUFFERED: '1' },
     });
 
@@ -195,6 +226,7 @@ function send(command, payload) {
 async function pickDirectory() {
   const result = await dialog.showOpenDialog(win, {
     title: 'Open repository',
+    defaultPath: realHome(),
     properties: ['openDirectory', 'createDirectory'],
     buttonLabel: 'Open',
   });

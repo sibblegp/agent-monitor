@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Agent Monitor app icon.
+
+  The source of truth for every rasterized icon in the project — snap, desktop
+  entry, and the macOS/Windows bundles. Drawn in the app's own vocabulary so the
+  icon reads as a miniature of the structure pane: a near-black field, a graph,
+  and exactly one node lit amber for "modified" with a pulse ring around it.
+
+  Deliberately only five nodes. At 32px anything busier turns to mush, and the
+  one thing the icon has to say is "something in here just changed".
+
+  Rasterize with packaging/make-icons.sh — do not hand-edit the PNGs.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="field" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#151a23"/>
+      <stop offset="0.55" stop-color="#0d1017"/>
+      <stop offset="1" stop-color="#080a0e"/>
+    </linearGradient>
+
+    <!-- The additive glow the renderer puts under a changed node. -->
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softglow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+
+    <radialGradient id="amber" cx="0.36" cy="0.32" r="0.78">
+      <stop offset="0" stop-color="#ffd07a"/>
+      <stop offset="0.45" stop-color="#f5a623"/>
+      <stop offset="1" stop-color="#c97d0c"/>
+    </radialGradient>
+
+    <radialGradient id="emerald" cx="0.36" cy="0.32" r="0.78">
+      <stop offset="0" stop-color="#8ff0b8"/>
+      <stop offset="1" stop-color="#3ddc84"/>
+    </radialGradient>
+  </defs>
+
+  <!-- field -->
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="url(#field)"/>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="112.5"
+        fill="none" stroke="#232b39" stroke-width="3"/>
+
+  <!-- Everything below is scaled about the centre of the changed node. The
+       graph was drawn at a comfortable size and then pushed out toward the
+       edges, because at 32px the deciding factor is how much of the frame the
+       shapes actually occupy. 1.12 is as far as it goes before the lower-right
+       node starts clipping the corner radius. -->
+  <g transform="translate(256 254) scale(1.12) translate(-256 -254)">
+
+  <!-- ── edges ──────────────────────────────────────────────────────────
+       Drawn first so the nodes sit on top of them. Unchanged edges stay
+       slate; the two touching the changed node carry its colour. -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M158 196 L250 254" stroke="#38bdf8" stroke-width="9" stroke-opacity="0.55"/>
+    <path d="M166 350 L246 274" stroke="#3a4354" stroke-width="8"/>
+    <path d="M262 236 L358 166" stroke="#f5a623" stroke-width="9" stroke-opacity="0.7"/>
+    <path d="M266 272 L354 344" stroke="#f5a623" stroke-width="9" stroke-opacity="0.45"/>
+  </g>
+
+  <!-- ── the changed node ───────────────────────────────────────────────
+       Amber = modified. The ring is the expanding pulse the renderer draws
+       for one beat after a change lands. -->
+  <circle cx="256" cy="254" r="68" fill="none" stroke="#f5a623"
+          stroke-width="7" stroke-opacity="0.5"/>
+  <circle cx="256" cy="254" r="46" fill="url(#amber)" filter="url(#glow)"/>
+
+  <!-- ── added ──────────────────────────────────────────────────────── -->
+  <circle cx="370" cy="152" r="30" fill="#3ddc84" filter="url(#softglow)" opacity="0.75"/>
+  <circle cx="370" cy="152" r="28" fill="url(#emerald)"/>
+
+  <!-- ── entry point: hollow cyan ring ──────────────────────────────── -->
+  <circle cx="146" cy="186" r="26" fill="#0a0c10" stroke="#38bdf8" stroke-width="9"/>
+
+  <!-- ── external package: hollow violet ────────────────────────────── -->
+  <circle cx="366" cy="356" r="24" fill="#0a0c10" stroke="#a06bff" stroke-width="8"/>
+
+  <!-- ── unchanged: dim slate ───────────────────────────────────────── -->
+  <circle cx="154" cy="360" r="22" fill="#3a4354"/>
+
+  </g>
+</svg>
