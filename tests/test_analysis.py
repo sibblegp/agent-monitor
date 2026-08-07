@@ -208,3 +208,99 @@ def test_root_commit_has_no_parent(tmp_path: Path):
     changes, base = gitutil.changed_files(target, "commit", sha)
     assert base is None
     assert all(c.status == "added" for c in changes), changes
+
+
+# ── unparsed languages must still be describable ──────────────────────
+
+
+def test_changeset_units_cover_files_without_symbols(tmp_path: Path):
+    """A shell script, README, or JSON config has no symbols to diff.
+
+    Iterating `symbols` alone made every such change invisible to the AI layer —
+    no narration, no hover summary. `units()` represents them as a single
+    file-level unit instead.
+    """
+    from agent_monitor.engine import Engine
+
+    root = _demo_repo(tmp_path)
+    (root / "run.sh").write_text("#!/usr/bin/env bash\necho hi\n")
+    (root / "README.md").write_text("# hello\n")
+    (root / "src" / "a.py").write_text("def alpha():\n    return 2\n")
+
+    engine = Engine()
+    engine.open(str(root))
+    engine._stop_watcher()
+
+    units = engine.changeset.units()
+    by_path = {u.path: u for u in units}
+
+    assert "run.sh" in by_path, "shell script produced no describable unit"
+    assert "README.md" in by_path, "markdown produced no describable unit"
+    assert by_path["run.sh"].kind == "file"
+    assert by_path["run.sh"].node_id == "file:run.sh"
+
+    # A file that *did* yield symbol changes is represented by those symbols,
+    # not duplicated as a whole-file unit.
+    py_units = [u for u in units if u.path == "src/a.py"]
+    assert py_units and all(u.kind != "file" for u in py_units), py_units
+    engine.close()
+
+
+def test_changes_view_contains_only_changed_things(tmp_path: Path):
+    """The Changes view must not show unchanged code.
+
+    It used to pull in two call-hops of context around every change, so a
+    one-line edit dragged in its callers, their callers, and all of their
+    parent directories — the view was mostly unchanged code.
+    """
+    from agent_monitor.engine import Engine
+    from agent_monitor.model import CHANGED_STATUSES
+
+    root = _demo_repo(tmp_path)
+    # A caller chain that must NOT be dragged in by proximity.
+    (root / "src" / "chain.py").write_text(
+        "from a import alpha\n"
+        "def one():\n    return alpha()\n"
+        "def two():\n    return one()\n"
+        "def three():\n    return two()\n"
+    )
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "chain"], check=True, capture_output=True)
+
+    (root / "src" / "a.py").write_text("def alpha():\n    return 42\n")
+
+    engine = Engine()
+    engine.open(str(root))
+    engine._stop_watcher()
+
+    nodes = engine.focus()["nodes"]
+    graph = engine.graph.nodes
+    stray = [
+        n for n in nodes
+        if graph[n].status not in CHANGED_STATUSES and graph[n].kind != "root"
+    ]
+    assert not stray, f"unchanged nodes leaked into the changes view: {stray}"
+    assert any(n.endswith("::alpha") for n in nodes), nodes
+    assert not any("chain.py" in n for n in nodes), "unchanged callers were pulled in"
+    engine.close()
+
+
+def test_a_class_holding_a_changed_method_reads_as_changed(tmp_path: Path):
+    """The class node is drawn as the method's parent, so it must not read grey."""
+    from agent_monitor.engine import Engine
+    from agent_monitor.model import CHANGED_STATUSES, sym_id
+
+    root = _demo_repo(tmp_path)
+    (root / "src" / "k.py").write_text("class T:\n    def go(self):\n        return 1\n")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "cls"], check=True, capture_output=True)
+
+    (root / "src" / "k.py").write_text("class T:\n    def go(self):\n        return 999\n")
+
+    engine = Engine()
+    engine.open(str(root))
+    engine._stop_watcher()
+
+    cls = engine.graph.nodes[sym_id("src/k.py", "T")]
+    assert cls.status in CHANGED_STATUSES, "class holding a changed method reads as unchanged"
+    engine.close()

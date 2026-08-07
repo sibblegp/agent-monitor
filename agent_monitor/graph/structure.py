@@ -220,10 +220,23 @@ def _roll_up_sizes_and_status(graph: Graph) -> None:
 
         if node.kind not in ("root", "dir"):
             best = node.status
+            holds_change = False
             for kid in kid_ids:
                 _, kid_status = visit(kid)
+                if kid_status in CHANGED_STATUSES:
+                    holds_change = True
                 if _rank(kid_status) > _rank(best):
                     best = kid_status
+
+            # A class whose *members* changed is untouched at the AST level, and
+            # the symbol diff rightly keeps saying so. But it still has to be
+            # drawn in the Changes view as the parent of its changed method, and
+            # leaving it grey there reads as "this didn't change" sitting in a
+            # view that promises only changes. Containers report that they hold
+            # a change, exactly like directories do.
+            if node.kind == "class" and holds_change and node.status not in CHANGED_STATUSES:
+                node.status = "modified"
+
             return node.size, best
 
         total = 0

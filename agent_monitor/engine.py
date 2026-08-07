@@ -142,13 +142,25 @@ class Engine:
         self.narrator = narrator
 
     def _symbol_hashes(self) -> dict[str, str]:
-        """node id -> semantic body hash, so annotations cache per symbol."""
+        """node id -> content fingerprint, so AI work caches per unit."""
+        import hashlib
+
         from .model import sym_id  # local import keeps module import cheap
 
         out: dict[str, str] = {}
         for path, pf in self.parsed.items():
             for symbol in pf.symbols.values():
                 out[sym_id(path, symbol.qualname)] = symbol.body_hash
+
+        # Whole-file units need a fingerprint too, or an unparsed file would be
+        # re-described on every rescan (no hash) or never again (stale hash).
+        # Only changed files are hashed, so this stays cheap.
+        for change in self.changeset.files:
+            raw = gitutil.read_worktree(self.target.root, change.path) if self.target else None
+            if raw is None:
+                out[file_id(change.path)] = f"gone:{change.status}"
+            else:
+                out[file_id(change.path)] = hashlib.sha1(raw).hexdigest()[:16]
         return out
 
     def _read_side(self, ref: str | None, path: str) -> str | None:
@@ -464,19 +476,28 @@ class Engine:
                 cursor = self.graph.nodes.get(cursor.parent)
         return out
 
-    def focus(self, depth: int = 2) -> dict[str, list[str]]:
-        """Node/edge ids the 'changes only' view should show."""
+    def focus(self, depth: int = 0) -> dict[str, list[str]]:
+        """Node/edge ids the 'changes only' view should show.
+
+        Strictly what changed, plus the directories and files needed to place
+        those nodes in the tree. Deliberately *no* call-hop expansion: pulling
+        in callers and callees two hops out meant the Changes view was mostly
+        unchanged code, which is the opposite of what it is for. The flow pane
+        adds that context back on demand via the depth control, client-side.
+        """
         changed = self.changed_node_ids()
-        nodes, edges = focus_subgraph(self.graph, changed, depth)
-        nodes |= self.ancestors_of(nodes | changed)
-        nodes |= changed
+        nodes = set(changed)
+        if depth > 0:
+            reachable, _ = focus_subgraph(self.graph, changed, depth)
+            nodes |= reachable
+        nodes |= self.ancestors_of(nodes)
         nodes.add(ROOT_ID)
-        contains = {
+        edges = {
             e.id
             for e in self.graph.edges.values()
-            if e.kind == "contains" and e.src in nodes and e.dst in nodes
+            if e.src in nodes and e.dst in nodes
         }
-        return {"nodes": sorted(nodes), "edges": sorted(edges | contains)}
+        return {"nodes": sorted(nodes), "edges": sorted(edges)}
 
     def meta(self) -> dict[str, Any]:
         target = self.target

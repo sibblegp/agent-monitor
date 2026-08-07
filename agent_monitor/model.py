@@ -280,6 +280,9 @@ class SymbolChange:
 
     @property
     def node_id(self) -> str:
+        # A whole-file unit addresses the file node, not a symbol inside it.
+        if self.kind == "file":
+            return file_id(self.path)
         return sym_id(self.path, self.qualname)
 
     def to_dict(self) -> dict[str, Any]:
@@ -311,6 +314,36 @@ class ChangeSet:
 
     def file_statuses(self) -> dict[str, str]:
         return {fc.path: fc.status for fc in self.files}
+
+    def units(self) -> list[SymbolChange]:
+        """Everything worth describing: changed symbols, plus whole-file changes.
+
+        Only Python/JS/TS get parsed into symbols, so iterating `symbols` alone
+        makes every other change invisible — a shell script, a README, a JSON
+        config would produce no narration and no hover summary at all. Files
+        that contributed no symbol change are represented here as a single
+        file-level unit so they are described too.
+        """
+        units = [s for s in self.symbols if s.status in CHANGED_STATUSES]
+        covered = {s.path for s in units}
+
+        for fc in self.files:
+            if fc.path in covered:
+                continue
+            name = fc.path.rsplit("/", 1)[-1]
+            units.append(
+                SymbolChange(
+                    path=fc.path,
+                    qualname=name,
+                    name=name,
+                    kind="file",
+                    status=fc.status,
+                    line=None,
+                    added=fc.added,
+                    removed=fc.removed,
+                )
+            )
+        return units
 
     def symbol_statuses(self) -> dict[str, SymbolChange]:
         return {sc.node_id: sc for sc in self.symbols}

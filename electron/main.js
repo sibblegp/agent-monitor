@@ -26,6 +26,21 @@ let win = null;
 let ready = null; // { port, token, url }
 let quitting = false;
 
+/**
+ * The repository to open, from `--repo <path>` or `--repo=<path>`.
+ *
+ * Deliberately not positional: Electron's argv includes the app directory, so a
+ * positional argument is ambiguous with it.
+ */
+function repoArg() {
+  const argv = process.argv;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--repo' && argv[i + 1]) return argv[i + 1];
+    if (argv[i].startsWith('--repo=')) return argv[i].slice('--repo='.length);
+  }
+  return null;
+}
+
 /** Prefer the project's virtualenv, then a `agent_monitor` on PATH, then bare python. */
 function pythonCandidates() {
   const isWin = process.platform === 'win32';
@@ -44,7 +59,12 @@ function startBackend() {
     const args = ['-m', 'agent_monitor', '--port', '0', '--no-browser'];
 
     // Open whatever the user passed on the command line, if anything.
-    const target = process.argv.slice(app.isPackaged ? 1 : 2).find((a) => !a.startsWith('-'));
+    //
+    // Read from an explicit --repo flag rather than a positional argument.
+    // Electron's argv also contains the app directory, and a bare positional
+    // was picking *that* up as the repo: launching from the project root
+    // silently opened `electron/` and watched only that subtree.
+    const target = repoArg();
     if (target) args.push(target);
 
     const child = spawn(exe, args, {

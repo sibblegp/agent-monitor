@@ -30,10 +30,10 @@
       <button class="seg-btn" data-filter="changes" title="Show only what changed (a)">Changes</button>
     </div>
 
-    <label class="depth" title="How many call hops around each change to include">
-      <span>depth</span>
-      <input id="depth" type="range" min="1" max="3" step="1" value="2" />
-      <output id="depth-out">2</output>
+    <label class="depth" title="Flow pane: how many call hops of context to show around each change">
+      <span>context</span>
+      <input id="depth" type="range" min="0" max="3" step="1" value="0" />
+      <output id="depth-out">changed only</output>
     </label>
 
     <div class="spacer"></div>
@@ -188,6 +188,11 @@
           </ul>
         </section>
         <section id="diag"></section>
+      </div>
+      <div class="modal-foot">
+        <span id="settings-dirty" class="muted small" hidden>Unsaved changes</span>
+        <button id="settings-cancel" class="btn">Cancel</button>
+        <button id="settings-save" class="btn btn-primary">Save</button>
       </div>
     </div>
   </div>

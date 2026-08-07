@@ -110,9 +110,7 @@ class Narrator:
     def _fresh_changes(self, changeset, symbol_hashes: dict[str, str]) -> list:
         """Changed symbols we haven't narrated yet, at their current content."""
         out = []
-        for change in changeset.symbols:
-            if change.status not in CHANGED_STATUSES:
-                continue
+        for change in changeset.units():
             node_id = change.node_id
             # Removals have no body hash; key them by status so a delete is
             # narrated once rather than on every subsequent rescan.

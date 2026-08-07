@@ -450,8 +450,13 @@ function setFilter(value) {
 }
 
 el.depth.addEventListener('input', () => {
+  // Flow-pane only, and applied locally: the whole graph is already loaded, so
+  // widening the call context is a relayout rather than a server round-trip.
   store.depth = Number(el.depth.value);
-  el.depthOut.textContent = el.depth.value;
+  el.depthOut.textContent = store.depth === 0 ? 'changed only' : `+${store.depth}`;
+  layeredLayout.sync(true);
+  needsFit = true;
+  dirty = true;
 });
 
 el.pause.addEventListener('click', togglePause);
@@ -775,7 +780,8 @@ async function boot() {
   initOpenDialog();
   renderLegend();
   setLiveState('idle');
-  el.depthOut.textContent = el.depth.value;
+  el.depth.value = String(store.depth);
+  el.depthOut.textContent = store.depth === 0 ? 'changed only' : `+${store.depth}`;
 
   onShellCommand(async (command, payload) => {
     if (command === 'open') {

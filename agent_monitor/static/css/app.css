@@ -457,6 +457,13 @@ html, body {
 .ref-list .r-subject { color: var(--text); }
 .ref-list .r-meta { color: var(--text-faint); font-size: 10.5px; }
 
+.modal-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 9px;
+  padding: 11px 14px; border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.012);
+}
+.modal-foot .muted { margin: 0; margin-right: auto; color: var(--modified); }
+
 .settings-body { padding: 14px; overflow-y: auto; display: grid; gap: 18px; }
 .settings-body h4 { margin: 0 0 6px; font-size: 12px; display: flex; align-items: center; gap: 7px; }
 .settings-body .tag {

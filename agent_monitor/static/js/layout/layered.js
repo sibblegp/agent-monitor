@@ -37,16 +37,16 @@ export class LayeredLayout {
   /** Which call edges are in play under the current filter. */
   _collect() {
     const { store } = this;
+    // In "changes", the flow pane may reach `depth` call hops past the changed
+    // set — an edge counts as long as both of its endpoints are in that reach.
+    const reach = store.flowNodes();
     const edges = [];
     for (const edge of store.edges.values()) {
       if (edge.kind !== 'calls') continue;
-      if (!store.isEdgeVisible(edge)) continue;
       const src = store.nodes.get(edge.src);
       const dst = store.nodes.get(edge.dst);
       if (!src || !dst) continue;
-      if (store.filter === 'changes' && !(store.focusNodes.has(src.id) && store.focusNodes.has(dst.id))) {
-        continue;
-      }
+      if (reach && !(reach.has(src.id) && reach.has(dst.id))) continue;
       edges.push(edge);
     }
 

@@ -44,7 +44,7 @@ export class Store {
     this.fx = new Map();
 
     this.filter = 'all'; // all | changes
-    this.depth = 2;
+    this.depth = 0; // extra call hops of flow-pane context; 0 = changed only
     this.paused = false;
     this.hover = null;
     this.selected = null;
@@ -186,7 +186,13 @@ export class Store {
     this.emit('ai', payload);
   }
 
-  /** Nodes visible under the current filter. */
+  /**
+   * Nodes visible under the current filter.
+   *
+   * In "changes" this is strict: only what actually changed, plus the
+   * directories and files that hold it. Unchanged code does not appear in the
+   * structure pane at all — that's the whole point of the view.
+   */
   isVisible(node) {
     if (this.filter === 'all') return true;
     return this.focusNodes.has(node.id);
@@ -195,6 +201,52 @@ export class Store {
   isEdgeVisible(edge) {
     if (this.filter === 'all') return true;
     return this.focusEdges.has(edge.id);
+  }
+
+  /**
+   * The flow pane's node set: everything `isVisible` allows, widened by
+   * `depth` call hops so a changed function's callers and callees can be seen.
+   *
+   * Call context is a flow-pane idea, so it's computed here rather than
+   * server-side — the whole graph is already in memory, so moving the depth
+   * control re-frames the pane immediately instead of waiting on a round-trip.
+   * At depth 0 it is exactly the changed set.
+   */
+  flowNodes() {
+    if (this.filter === 'all') return null; // null = no restriction
+    const key = `${this.version}|${this.depth}`;
+    if (this._flowKey === key) return this._flowSet;
+
+    const set = new Set(this.focusNodes);
+    if (this.depth > 0) {
+      const adj = new Map();
+      const link = (a, b) => {
+        let list = adj.get(a);
+        if (!list) adj.set(a, (list = []));
+        list.push(b);
+      };
+      for (const edge of this.edges.values()) {
+        if (edge.kind !== 'calls') continue;
+        link(edge.src, edge.dst);
+        link(edge.dst, edge.src);
+      }
+      let frontier = [...set];
+      for (let hop = 0; hop < this.depth && frontier.length; hop++) {
+        const next = [];
+        for (const id of frontier) {
+          for (const neighbour of adj.get(id) || []) {
+            if (set.has(neighbour)) continue;
+            set.add(neighbour);
+            next.push(neighbour);
+          }
+        }
+        frontier = next;
+      }
+    }
+
+    this._flowKey = key;
+    this._flowSet = set;
+    return set;
   }
 
   childrenOf(id) {

@@ -3,9 +3,11 @@
 Design constraints that shaped this:
 
 - **Opt-in.** Nothing here runs unless the user turns AI insights on.
-- **One request per changeset**, never per symbol.
-- **Results cached by (qualname, body_hash)**, so an unchanged symbol is never
-  re-analyzed even as the changeset around it churns.
+- **Batched**, never one request per symbol: a changeset goes out in blocks of
+  `SYMBOLS_PER_BATCH`, sized so the model answers for every symbol in the block.
+- **Results cached by (node id, body_hash)**, so an unchanged symbol is never
+  re-analyzed even as the changeset around it churns — but only once the model
+  has actually described it.
 - **Never load-bearing.** Any failure is reported and swallowed; the
   visualization is fully functional without it.
 """
@@ -33,6 +35,61 @@ PRICING = {
 MAX_SYMBOLS_PER_CALL = 60
 MAX_DIFF_LINES = 60
 MAX_REQUESTS_PER_SESSION = 200
+#: Symbols described per request. Large batches come back partly unanswered.
+SYMBOLS_PER_BATCH = 15
+#: How many times to re-ask about a symbol the model declined to describe.
+MAX_RETRIES_PER_SYMBOL = 2
+#: Themes are drawn as labelled hulls; past a handful they just overlap.
+MAX_THEMES = 5
+
+
+def _resolver(refs: dict[str, Any]):
+    """Map an id the model returned back to a real node id.
+
+    Exact token first. Failing that, fall back to matching whatever it said
+    against the node ids themselves — it sometimes answers with the qualname or
+    a prefix-stripped node id, and a recognisable answer shouldn't be thrown
+    away over its formatting.
+    """
+    by_node = {change.node_id: change.node_id for change in refs.values()}
+    loose = {}
+    for node_id in by_node:
+        _, _, tail = node_id.partition(":")
+        loose[tail] = node_id
+        loose[node_id.rpartition("::")[2] or node_id] = node_id
+
+    def resolve(raw: Any) -> str | None:
+        if not isinstance(raw, str):
+            return None
+        ref = refs.get(raw.strip())
+        if ref is not None:
+            return ref.node_id
+        text = raw.strip()
+        return by_node.get(text) or loose.get(text)
+
+    return resolve
+
+
+def _merge_themes(themes: list[dict]) -> list[dict]:
+    """Fold per-batch themes into one set, unioning members of same-named ones.
+
+    Each batch names its own themes, so a large changeset yields a dozen
+    near-duplicates. They're drawn as labelled hulls behind their members, and a
+    dozen overlapping labels is worse than none — keep the biggest few.
+    """
+    merged: dict[str, dict] = {}
+    for theme in themes:
+        name = theme.get("name")
+        if not name:
+            continue
+        entry = merged.setdefault(name, {"name": name, "members": []})
+        seen = set(entry["members"])
+        for member in theme.get("members", []):
+            if member not in seen:
+                seen.add(member)
+                entry["members"].append(member)
+    ranked = sorted(merged.values(), key=lambda t: len(t["members"]), reverse=True)
+    return [t for t in ranked if t["members"]][:MAX_THEMES]
 
 
 class AiUnavailable(RuntimeError):
@@ -59,6 +116,8 @@ class AiAnnotator:
         self.usage = {"input_tokens": 0, "output_tokens": 0, "requests": 0, "cost_usd": 0.0}
         self.last_error: str | None = None
         self._cache: dict[tuple[str, str], dict[str, Any]] = {}
+        #: How often the model has declined to describe a given symbol.
+        self._misses: dict[tuple[str, str], int] = {}
         self._lock = threading.Lock()
         self._inflight = False
         self._pending_args = None
@@ -150,7 +209,7 @@ class AiAnnotator:
     def annotate(
         self, target, changeset, langs, files, read_side, symbol_hashes
     ) -> dict[str, Any] | None:
-        changed = [s for s in changeset.symbols if s.status in CHANGED_STATUSES]
+        changed = changeset.units()
         if not changed:
             return None
 
@@ -189,46 +248,94 @@ class AiAnnotator:
         # than whatever happened to sort last by path.
         pending.sort(key=lambda item: item[0].added + item[0].removed, reverse=True)
 
-        entries = []
-        for change, _key in pending[:MAX_SYMBOLS_PER_CALL]:
+        def entry_for(change, ref: str) -> dict[str, Any]:
             file_change = next((f for f in changeset.files if f.path == change.path), None)
             old_text = read_side(file_change.old_ref if file_change else None, change.path)
             new_text = read_side(file_change.new_ref if file_change else None, change.path)
-            entries.append(
-                {
-                    "id": change.node_id,
-                    "status": change.status,
-                    "kind": change.kind,
-                    "qualname": change.qualname,
-                    "path": change.path,
-                    "diff": _slice_diff(old_text, new_text, change),
-                }
-            )
-
-        truncated = max(0, len(pending) - MAX_SYMBOLS_PER_CALL)
-        result = self._request(target, langs, files, entries, truncated)
-
-        # Cache per symbol so the next changeset reuses this work.
-        by_id = {s["id"]: s.get("text") for s in result.get("summaries", [])}
-        risk_by_id = {r["id"]: r for r in result.get("risk", [])}
-        for change, key in pending[:MAX_SYMBOLS_PER_CALL]:
-            self._cache[key] = {
-                "summary": by_id.get(change.node_id),
-                "risk": {
-                    "level": risk_by_id.get(change.node_id, {}).get("level"),
-                    "reason": risk_by_id.get(change.node_id, {}).get("reason"),
-                }
-                if change.node_id in risk_by_id
-                else None,
+            return {
+                "id": ref,
+                "status": change.status,
+                "kind": change.kind,
+                "qualname": change.qualname,
+                "path": change.path,
+                "diff": _slice_diff(old_text, new_text, change),
             }
 
-        result["summaries"] = cached_summaries + result.get("summaries", [])
-        result["risk"] = cached_risk + result.get("risk", [])
-        result["usage"] = self.usage
+        truncated = max(0, len(pending) - MAX_SYMBOLS_PER_CALL)
+        analysing = pending[:MAX_SYMBOLS_PER_CALL]
+
+        # Ask about a bounded number of symbols at a time. Handed fifty at once
+        # the model reliably answers for a subset and drops the rest, which used
+        # to leave those symbols with no synopsis at all; smaller batches come
+        # back complete. The cached system prefix makes the extra calls cheap.
+        summaries: list[dict[str, Any]] = []
+        risk: list[dict[str, Any]] = []
+        themes: list[dict[str, Any]] = []
+        note = ""
+        for start in range(0, len(analysing), SYMBOLS_PER_BATCH):
+            batch = analysing[start : start + SYMBOLS_PER_BATCH]
+
+            # Refer to symbols by a short opaque token rather than by node id.
+            # Given `sym:path/to/f.py::Klass.method` the model helpfully
+            # "normalises" the `sym:` prefix away, and every annotation then
+            # keyed a node that doesn't exist — so nothing showed on hover.
+            # A token it has no opinion about comes back verbatim.
+            refs = {f"s{start + i + 1}": change for i, (change, _k) in enumerate(batch)}
+            entries = [entry_for(change, ref) for ref, change in refs.items()]
+            part = self._request(
+                target, langs, files, entries, truncated if start == 0 else 0
+            )
+            resolve = _resolver(refs)
+
+            for item in part.get("summaries", []):
+                node_id = resolve(item.get("id"))
+                if node_id:
+                    summaries.append({"id": node_id, "text": item.get("text")})
+            for item in part.get("risk", []):
+                node_id = resolve(item.get("id"))
+                if node_id:
+                    risk.append({**item, "id": node_id})
+            for theme in part.get("themes", []):
+                members = [resolve(m) for m in theme.get("members", [])]
+                themes.append({**theme, "members": [m for m in members if m]})
+            note = note or part.get("review_note", "")
+
+            # Cache only what actually came back. Marking a skipped symbol as
+            # analysed burns it permanently: it never matches again, so it can
+            # never be re-requested, and it has no summary to serve either.
+            by_id = {s["id"]: s.get("text") for s in summaries}
+            risk_by_id = {r["id"]: r for r in risk}
+            for change, key in batch:
+                described = by_id.get(change.node_id)
+                if not described and change.node_id not in risk_by_id:
+                    misses = self._misses.get(key, 0) + 1
+                    self._misses[key] = misses
+                    # After a few attempts, accept that the model has nothing to
+                    # say about it rather than paying for it on every rescan.
+                    if misses < MAX_RETRIES_PER_SYMBOL:
+                        continue
+                self._cache[key] = {
+                    "summary": described,
+                    "risk": {
+                        "level": risk_by_id.get(change.node_id, {}).get("level"),
+                        "reason": risk_by_id.get(change.node_id, {}).get("reason"),
+                    }
+                    if change.node_id in risk_by_id
+                    else None,
+                }
+
+        result: dict[str, Any] = {
+            "summaries": cached_summaries + summaries,
+            "risk": cached_risk + risk,
+            # Themes span the whole changeset, so merge them across batches.
+            "themes": _merge_themes(themes),
+            "review_note": note,
+            "usage": self.usage,
+        }
         if truncated:
             result["truncated"] = truncated
-        self._last_themes = result.get("themes", [])
-        self._last_note = result.get("review_note", "")
+        self._last_themes = result["themes"]
+        self._last_note = note
         return result
 
     _last_themes: list[dict[str, Any]] = []

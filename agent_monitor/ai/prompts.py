@@ -48,7 +48,13 @@ ANNOTATE_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "id": {"type": "string", "description": "The node id, copied exactly."},
+                        "id": {
+                            "type": "string",
+                            "description": (
+                                "The bracketed reference of the symbol, copied "
+                                "exactly, e.g. `s3`."
+                            ),
+                        },
                         "text": {
                             "type": "string",
                             "description": "One short clause describing what the change does.",

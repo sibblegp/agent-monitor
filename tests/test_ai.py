@@ -7,6 +7,7 @@ narrates deltas rather than re-describing the same code.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import threading
@@ -421,4 +422,183 @@ def test_narration_streams_progressively(tmp_path: Path):
     for earlier, later in zip(detail_states, detail_states[1:]):
         assert later.startswith(earlier), (earlier, later)
     assert detail_states[-1] == narrator.entries[0]["detail"]
+    engine.close()
+
+
+def test_unparsed_files_are_narrated(tmp_path: Path):
+    """Regression: adding a shell script produced no transcript entry at all."""
+    engine, narrator, stub, _ = _harness(tmp_path)
+    _observe(engine, narrator)
+
+    (Path(engine.target.root) / "deploy.sh").write_text("#!/bin/sh\necho deploying\n")
+    engine.rescan()
+    _observe(engine, narrator)
+
+    assert len(stub.narrations()) == 1, "a non-Python file change was never narrated"
+    prompt = stub.narrations()[-1]["messages"][0]["content"]
+    assert "deploy.sh" in prompt
+    engine.close()
+
+
+# ── every changed symbol must eventually get a synopsis ───────────────
+
+
+class _PartialClient(_StubClient):
+    """Answers for only the first `answers` symbols of each request.
+
+    Models routinely under-fill a long array. The annotator has to cope with
+    that rather than treating silence as "analysed".
+    """
+
+    def __init__(self, answers=1):
+        super().__init__()
+        self.answers = answers
+        self.asked = []  # ids requested, per call
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        tool = kwargs["tool_choice"]["name"]
+        if tool != "annotate_changeset":
+            return _Response(tool, self._payload_for(tool))
+        text = kwargs["messages"][0]["content"]
+        ids = re.findall(r"^\[([^\]]+)\]$", text, re.MULTILINE)
+        self.asked.append(ids)
+        return _Response(
+            tool,
+            {
+                "summaries": [{"id": i, "text": f"about {i}"} for i in ids[: self.answers]],
+                "risk": [],
+                "themes": [],
+                "review_note": "note",
+            },
+        )
+
+
+def _annotate(engine, annotator):
+    langs: dict[str, int] = {}
+    for parsed in engine.parsed.values():
+        langs[parsed.lang] = langs.get(parsed.lang, 0) + 1
+    return annotator.annotate(
+        engine.target, engine.changeset, langs, sorted(engine.parsed),
+        engine._read_side, engine._symbol_hashes(),
+    )
+
+
+def test_symbols_the_model_skips_are_retried(tmp_path: Path):
+    """Regression: a skipped symbol used to be cached as analysed-but-empty.
+
+    It then matched the cache forever, so it was never re-requested and never
+    had a summary to serve — the synopsis simply never appeared on hover.
+    """
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    stub = _PartialClient(answers=1)
+    annotator = AiAnnotator(settings)
+    annotator._client = lambda: stub
+
+    root = Path(engine.target.root)
+    (root / "app.py").write_text(
+        "def alpha():\n    return 2\n\ndef beta():\n    return 3\n\ndef gamma():\n    return 4\n"
+    )
+    engine.rescan()
+
+    first = _annotate(engine, annotator)
+    assert len(first["summaries"]) == 1, first["summaries"]
+
+    # Nothing about the code changed, so a cache-only design would go quiet.
+    # The undescribed symbols must be asked about again.
+    second = _annotate(engine, annotator)
+    assert len(stub.asked) >= 2, "skipped symbols were never re-requested"
+    assert len(second["summaries"]) >= 2, "retry produced no additional synopsis"
+    engine.close()
+
+
+def test_large_changesets_are_batched(tmp_path: Path):
+    """One giant request comes back partly unanswered, so split it up."""
+    from agent_monitor.ai.client import SYMBOLS_PER_BATCH
+
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    stub = _PartialClient(answers=99)
+    annotator = AiAnnotator(settings)
+    annotator._client = lambda: stub
+
+    count = SYMBOLS_PER_BATCH * 2 + 3
+    body = "".join(f"def fn{i}():\n    return {i}\n\n" for i in range(count))
+    (Path(engine.target.root) / "app.py").write_text(body)
+    engine.rescan()
+
+    result = _annotate(engine, annotator)
+    assert len(stub.asked) == 3, f"expected 3 batches, got {len(stub.asked)}"
+    assert all(len(ids) <= SYMBOLS_PER_BATCH for ids in stub.asked), [len(i) for i in stub.asked]
+    # Every symbol asked about is described exactly once.
+    assert len(result["summaries"]) == sum(len(ids) for ids in stub.asked)
+    engine.close()
+
+
+class _PrefixStrippingClient(_StubClient):
+    """Answers with the node id minus its `sym:` prefix — what really happens.
+
+    Sonnet treats `sym:` as a namespace marker and normalises it away, so every
+    annotation keyed a node that doesn't exist and no synopsis ever appeared.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.asked = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        tool = kwargs["tool_choice"]["name"]
+        if tool != "annotate_changeset":
+            return _Response(tool, self._payload_for(tool))
+        text = kwargs["messages"][0]["content"]
+        blocks = re.findall(r"^\[([^\]]+)\]\n  status.*?\n  symbol: \S+ (\S+) in (\S+)", text, re.M | re.S)
+        self.asked.append([b[0] for b in blocks])
+        return _Response(
+            tool,
+            {
+                # Deliberately NOT the token it was handed.
+                "summaries": [{"id": f"{path}::{qual}", "text": f"about {qual}"} for _, qual, path in blocks],
+                "risk": [],
+                "themes": [],
+                "review_note": "note",
+            },
+        )
+
+
+def test_annotations_survive_a_reformatted_id(tmp_path: Path):
+    """A recognisable-but-reformatted id must still land on its node."""
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    stub = _PrefixStrippingClient()
+    annotator = AiAnnotator(settings)
+    annotator._client = lambda: stub
+
+    (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 7\n")
+    engine.rescan()
+
+    result = _annotate(engine, annotator)
+    ids = {s["id"] for s in result["summaries"]}
+    assert ids, "no summaries came back at all"
+    node_ids = set(engine.graph.nodes)
+    assert ids <= node_ids, f"summaries keyed nodes that don't exist: {ids - node_ids}"
+
+    engine.apply_ai(result)
+    described = [n for n in engine.graph.nodes.values() if n.summary]
+    assert described, "annotations never reached the graph"
+    engine.close()
+
+
+def test_symbols_are_referenced_by_opaque_token(tmp_path: Path):
+    """The prompt must not hand the model an id it will want to tidy up."""
+    engine, _narrator, _stub, settings = _harness(tmp_path)
+    stub = _PartialClient(answers=99)
+    annotator = AiAnnotator(settings)
+    annotator._client = lambda: stub
+
+    (Path(engine.target.root) / "app.py").write_text("def alpha():\n    return 7\n")
+    engine.rescan()
+    _annotate(engine, annotator)
+
+    sent = stub.asked[0]
+    assert sent, "nothing was sent"
+    assert all(re.fullmatch(r"s\d+", ref) for ref in sent), sent
     engine.close()
