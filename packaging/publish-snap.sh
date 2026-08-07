@@ -33,9 +33,23 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 # ---- login ----------------------------------------------------------
 
 if [ "${1:-}" = "login" ]; then
+  # snapcraft prompts for an email, a password and a 2FA code, all of which
+  # need a real terminal. Say so plainly — without this the only symptom is
+  # docker's "cannot attach stdin to a TTY-enabled container", which does not
+  # suggest the fix.
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    echo "This step is interactive: it asks for your Ubuntu One email," >&2
+    echo "password and 2FA code, which needs a real terminal." >&2
+    echo >&2
+    echo "Run it in a terminal window directly, not through a tool, pipe or" >&2
+    echo "editor integration:" >&2
+    echo "    ./packaging/publish-snap.sh login" >&2
+    echo >&2
+    echo "Already have credentials from elsewhere? Skip this and export" >&2
+    echo "SNAPCRAFT_STORE_CREDENTIALS instead." >&2
+    exit 1
+  fi
   mkdir -p "$CRED_DIR"
-  echo "A URL will be printed below. Open it, approve the request, and come back."
-  echo
   docker run --rm -it -v "$CRED_DIR:/creds" "$IMAGE" \
     snapcraft export-login \
       --snaps "$SNAP_NAME" \
@@ -76,7 +90,12 @@ case "${1:-}" in
 esac
 
 echo "==> Uploading $(basename "$SNAP_FILE") to '$SNAP_NAME'${1:+, releasing to $1}"
-docker run --rm -it \
+# Only ask for a TTY when there is one: the upload itself is non-interactive
+# once credentials are in the environment, so it should still work when driven
+# by a script or a tool.
+tty_flag=()
+[ -t 0 ] && [ -t 1 ] && tty_flag=(-it)
+docker run --rm "${tty_flag[@]}" \
   -v "$PWD/$(dirname "$SNAP_FILE"):/snap:ro" \
   -e SNAPCRAFT_STORE_CREDENTIALS="$CREDS" \
   "$IMAGE" snapcraft "${args[@]}"
