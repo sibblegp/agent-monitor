@@ -50,13 +50,17 @@ if [ "${1:-}" = "login" ]; then
     exit 1
   fi
   mkdir -p "$CRED_DIR"
-  docker run --rm -it -v "$CRED_DIR:/creds" "$IMAGE" \
+  docker run --rm -it -v "$CRED_DIR:/creds" "$IMAGE" sh -c "
     snapcraft export-login \
-      --snaps "$SNAP_NAME" \
+      --snaps '$SNAP_NAME' \
       --acls package_access,package_push,package_update,package_release \
       --channels stable,candidate,beta,edge \
-      /creds/snapcraft.credentials
-  chmod 600 "$CRED_FILE"
+      /creds/snapcraft.credentials || exit 1
+    # snapcraft runs as root in here, so the file lands root-owned and the
+    # invoking user cannot even chmod their own credentials afterwards.
+    chown $(id -u):$(id -g) /creds/snapcraft.credentials
+    chmod 600 /creds/snapcraft.credentials
+  "
   echo
   echo "Stored at $CRED_FILE (0600). Delete it to revoke."
   exit 0
@@ -83,7 +87,10 @@ else
   exit 1
 fi
 
-args=(upload "/snap/$(basename "$SNAP_FILE")")
+# Mounted at /artifacts, emphatically not /snap: the container keeps its
+# unpacked snapcraft under /snap/snapcraft, and mounting over that directory
+# hides snapcraft's own Python interpreter from it.
+args=(upload "/artifacts/$(basename "$SNAP_FILE")")
 case "${1:-}" in
   ""|--no-release) ;;
   *) args+=(--release "$1") ;;
@@ -95,8 +102,10 @@ echo "==> Uploading $(basename "$SNAP_FILE") to '$SNAP_NAME'${1:+, releasing to 
 # by a script or a tool.
 tty_flag=()
 [ -t 0 ] && [ -t 1 ] && tty_flag=(-it)
+# Writable, not :ro — snapcraft reads the snap's metadata by unsquashing it
+# into a temporary directory it creates alongside the file itself.
 docker run --rm "${tty_flag[@]}" \
-  -v "$PWD/$(dirname "$SNAP_FILE"):/snap:ro" \
+  -v "$PWD/$(dirname "$SNAP_FILE"):/artifacts" \
   -e SNAPCRAFT_STORE_CREDENTIALS="$CREDS" \
   "$IMAGE" snapcraft "${args[@]}"
 
